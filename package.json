@@ -1,0 +1,52 @@
+{
+  "name": "lumen-launcher",
+  "version": "1.0.0",
+  "description": "Lumen — альтернативный лаунчер Roblox",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "icon": "node scripts/make-icon.js",
+    "dist": "electron-builder --win --x64",
+    "release": "npm version patch -m \"Release %s\" && git push origin HEAD --follow-tags",
+    "release:minor": "npm version minor -m \"Release %s\" && git push origin HEAD --follow-tags"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "@electron/fuses": "^1.8.0"
+  },
+  "build": {
+    "appId": "dev.lumen.launcher",
+    "productName": "Lumen",
+    "files": [
+      "main.js",
+      "preload.js",
+      "bootstrapper.js",
+      "lang.js",
+      "png.js",
+      "discord.js",
+      "activity.js",
+      "session.js",
+      "renderer/**",
+      "accounts.js",
+      "discover.js",
+      "overlay.js",
+      "overlay-preload.js",
+      "updater.js"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "Lumen-Setup-${version}.exe"
+    },
+    "afterPack": "build/fuses.js"
+  }
+}

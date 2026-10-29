@@ -1,0 +1,4 @@
+html,body{margin:0;background:transparent;overflow:hidden;user-select:none;font-family:"Segoe UI",system-ui,sans-serif}
+#box{display:inline-flex;gap:3px 16px;padding:6px 10px;border-radius:8px;white-space:nowrap;font-weight:600;line-height:1.35}
+.m{display:flex;gap:8px;justify-content:space-between}
+.l{opacity:.7}

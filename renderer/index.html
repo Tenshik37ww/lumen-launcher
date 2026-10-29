@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src data: https:; media-src blob:">
+  <title>Lumen</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-nav="left" data-style="ring" data-bg="solid">
+  <div class="bgfx" aria-hidden="true"><canvas id="live"></canvas><video id="bgvid" muted loop playsinline></video><i></i><i></i></div>
+  <header class="bar">
+    <span class="brandwrap"><img id="brandIcon" alt="" hidden><span class="brand" id="brand">Lumen</span></span>
+    <div class="win">
+      <button data-win="min" aria-label="Minimize">&#8211;</button>
+      <button data-win="close" aria-label="Close">&#10005;</button>
+    </div>
+  </header>
+  <nav class="rail" id="rail"><span class="indicator"></span></nav>
+  <main id="pages">
+    <div id="updbar" class="updbar" hidden><span id="updtxt"></span><button id="updbtn" class="btn primary"></button></div>
+    <section id="home" class="view on">
+      <div class="stage">
+        <svg class="ring" viewBox="0 0 200 200" aria-hidden="true">
+          <circle class="track" cx="100" cy="100" r="88"/>
+          <circle id="arc" class="arc intro" cx="100" cy="100" r="88"/>
+        </svg>
+        <button id="play" class="play"><span id="playLabel"></span></button>
+      </div>
+      <div class="barwrap"><div id="barfill"></div></div>
+      <p id="status" class="status" aria-live="polite"></p>
+      <p id="ver" class="ver"></p>
+      <div id="accchip" class="accchip" hidden><img id="accImg" alt="" hidden><select id="accSel" aria-label="Account"></select></div>
+      <div id="act" class="act" hidden>
+        <img id="actIcon" alt="">
+        <div><b id="actName"></b><small id="actInfo"></small></div>
+      </div>
+    </section>
+  </main>
+  <script src="../lang.js"></script>
+  <script src="app.js"></script>
+  <script src="pages2.js"></script>
+  <script src="updates.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        shell: bash
+        run: npm install
+      - name: Check tag matches version
+        shell: bash
+        run: node scripts/check-version.js
+      - name: Set update feed to this repository
+        shell: bash
+        run: node scripts/set-publish.js
+      - name: Build and publish release
+        shell: bash
+        run: npx electron-builder --win --x64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
