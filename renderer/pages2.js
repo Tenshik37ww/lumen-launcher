@@ -20,7 +20,6 @@ Object.assign(THEMES, {
   mint:            { bg: '#effaf5', panel: '#ffffff', line: '#cfeadf', text: '#10302a', mute: '#5b8a7c', accent: '#10b981', danger: '#d9435e' },
 });
 const themeIds = () => ['system', ...Object.keys(THEMES), 'custom'];
-NAV.splice(0, NAV.length, 'home', 'library', 'discover', 'news', 'friends', 'stats', 'accounts', 'tools', 'overlay', 'integr', 'launcher', 'mods', 'engine', 'look', 'links');
 
 let newsBadge = 0, libFolder = 'all', itgEl = null;
 const segState = {}, dq = { q: '', genre: '', minRating: 0, minPlayers: 0, updatedDays: 0, sort: 'players' };
@@ -36,9 +35,10 @@ const ago = iso => {
   const h = Math.floor(m / 60); return h < 48 ? t('ago.h', { n: h }) : t('ago.d', { n: Math.floor(h / 24) });
 };
 const fieldOf = (lk, c) => { const L = E('label', 'fl'); L.append(E('small', null, t(lk)), c); return L; };
-const thumb = (el, url) => { const u = safeImg(url); if (u) el.style.backgroundImage = `url("${u}")`; return el; };
+const thumb = (el_, url) => { const u = safeImg(url); if (u) el_.style.backgroundImage = `url("${u}")`; return el_; };
+const spacer = () => { const s = E('span'); s.style.flex = '1'; return s; };
 
-// сегментированный переключатель внутри страницы
+// подвкладки в виде «таблеток»; подстраницы по схеме подключаются через sub()
 function seg(id, opts) {
   const W = E('div'), bar = E('div', 'seg'), body = E('div'), btns = {};
   const draw = k => { segState[id] = k; for (const x in btns) btns[x].classList.toggle('on', x === k); body.replaceChildren(opts.find(o => o[0] === k)[2]()); };
@@ -47,7 +47,8 @@ function seg(id, opts) {
   draw(opts.some(o => o[0] === segState[id]) ? segState[id] : opts[0][0]);
   return W;
 }
-function jumpServers(placeId) { pendingServer = placeId; segState.discover = 'servers'; show('discover'); build('discover'); }
+const sub = id => () => { const s = E('div'); subSlots[id] = s; s.append(renderPage(id)); return s; };
+function jumpServers(placeId) { pendingServer = placeId; segState.discover = 'servers'; show('discover'); }
 
 /* ---------- библиотека с папками ---------- */
 function card(p, big, refresh) {
@@ -65,32 +66,39 @@ function card(p, big, refresh) {
   ov.append(pl, sv, fs_, rm);
   const meta = E('div', 'meta');
   meta.append(E('b', null, p.name || p.placeId), E('small', null, p.totalMs ? fmtTime(p.totalMs) : t('lib.never')),
-    E('small', null, p.last ? t('lib.last', { d: new Date(p.last).toLocaleDateString(cfg.language) }) : ''));
+    E('small', null, p.last ? t('lib.last', { d: new Date(p.last).toLocaleDateString(cfg.language, { day: 'numeric', month: 'short' }) }) : ''));
   c.append(cv, ov, fav, meta);
   return c;
 }
 
 function library() {
-  const W = E('div'), bar = E('div', 'libbar'), chips = E('div', 'chips'), body = E('div');
-  const q = E('input'), srt = E('select'), ai = E('input'), ab = E('button', 'btn', t('lib.addBtn'));
+  const W = E('div'), bar = E('div', 'toolbar'), addRow = E('div', 'toolbar'), chips = E('div', 'chips'), body = E('div');
+  const q = E('input'), srt = E('select'), addBtn = E('button', 'btn', '+ ' + t('lib.add')), ai = E('input'), ab = E('button', 'btn primary', t('lib.addBtn'));
   q.placeholder = t('lib.search'); q.value = libQ; ai.placeholder = t('lib.addPh');
   for (const [v, k] of [['recent', 'lib.s.recent'], ['time', 'lib.s.time'], ['name', 'lib.s.name']]) { const o = E('option', null, t(k)); o.value = v; srt.append(o); }
   srt.value = libSort;
-  bar.append(q, srt, ai, ab); W.append(bar, chips, body);
+  addRow.hidden = true;
+  addBtn.onclick = () => { addRow.hidden = !addRow.hidden; if (!addRow.hidden) ai.focus(); };
+  bar.append(q, srt, addBtn); addRow.append(ai, ab); W.append(bar, addRow, chips, body);
   if (libFolder !== 'all' && libFolder !== 'fav' && !cfg.folders.some(f => f.id === libFolder)) libFolder = 'all';
+  let adding = false;
 
   const drawChips = () => {
     chips.replaceChildren();
     const chip = (label, key) => { const b = E('button', 'chip' + (libFolder === key ? ' on' : ''), label); b.onclick = () => { libFolder = key; drawChips(); draw(); }; chips.append(b); };
     chip(t('lib.f.all'), 'all'); chip(t('lib.f.fav'), 'fav');
     cfg.folders.forEach(f => chip('▸ ' + f.name, f.id));
-    const ni = E('input'), nb = E('button', 'chip', '+');
-    ni.placeholder = t('lib.f.new');
-    nb.onclick = () => {
-      const name = ni.value.trim().slice(0, 30); if (!name) return;
-      const f = { id: 'f' + Date.now().toString(36), name }; save({ folders: [...cfg.folders, f] }); libFolder = f.id; drawChips(); draw();
-    };
-    chips.append(ni, nb);
+    if (adding) {
+      const ni = E('input'), ok = E('button', 'chip on', t('lib.f.add'));
+      ni.placeholder = t('lib.f.name');
+      ok.onclick = () => {
+        const name = ni.value.trim().slice(0, 30); adding = false;
+        if (name) { const f = { id: 'f' + Date.now().toString(36), name }; save({ folders: [...cfg.folders, f] }); libFolder = f.id; }
+        drawChips(); draw();
+      };
+      ni.onkeydown = e => { if (e.key === 'Enter') ok.onclick(); };
+      chips.append(ni, ok); setTimeout(() => ni.focus(), 0);
+    } else { const nb = E('button', 'chip', '+ ' + t('lib.f.new')); nb.onclick = () => { adding = true; drawChips(); }; chips.append(nb); }
     const cur = cfg.folders.find(f => f.id === libFolder);
     if (cur) {
       const ri = E('input'), rb = E('button', 'chip', t('lib.f.rename')), db = E('button', 'chip', t('lib.f.del'));
@@ -115,17 +123,17 @@ function library() {
     if (libSort === 'recent' && !needle && libFolder === 'all') {
       const shelf = E('div', 'shelf');
       list.filter(p => p.last).slice(0, 6).forEach(p => shelf.append(card(p, true, draw)));
-      if (shelf.children.length) body.append(E('h3', null, t('lib.recent')), shelf);
+      if (shelf.children.length) body.append(E('h3', 'sect', t('lib.recent')), shelf);
     }
     const grid = E('div', 'grid');
     list.forEach(p => grid.append(card(p, false, draw)));
-    body.append(E('h3', null, t('lib.all')), grid);
+    body.append(E('h3', 'sect', t('lib.all')), grid);
   };
   q.oninput = () => { libQ = q.value; draw(); };
   srt.onchange = () => { libSort = srt.value; draw(); };
   ab.onclick = async () => {
     const r = await api.libAdd(ai.value);
-    if (r.error) { ab.textContent = t('lib.err.' + r.error); setTimeout(() => { ab.textContent = t('lib.addBtn'); }, 2500); } else { ai.value = ''; draw(); }
+    if (r.error) { ab.textContent = t('lib.err.' + r.error); setTimeout(() => { ab.textContent = t('lib.addBtn'); }, 2500); } else { ai.value = ''; addRow.hidden = true; draw(); }
   };
   drawChips(); draw(); return W;
 }
@@ -149,21 +157,21 @@ function gameCard(g) {
   return c;
 }
 function discoverGames() {
-  const W = E('div'), bar = E('div', 'libbar'), out = E('div'), q = E('input'), go = E('button', 'btn primary', t('d.search'));
-  q.placeholder = t('d.q'); q.value = dq.q;
+  const W = E('div'), F = E('div', 'filters'), wide = E('div', 'wide'), out = E('div'), q = E('input'), go = E('button', 'btn primary', t('d.search'));
+  q.placeholder = t('d.q'); q.value = dq.q; wide.append(q, go);
   const mk = (key, opts) => {
     const s = E('select');
     for (const [v, l] of opts) { const o = E('option', null, tx(l)); o.value = v; s.append(o); }
     s.value = String(dq[key]); s.onchange = () => { dq[key] = s.value; }; return s;
   };
   const GENRES = ['Obby', 'Tycoon', 'Simulator', 'RPG', 'Shooter', 'Horror', 'Racing', 'Fighting', 'Roleplay', 'Survival', 'Sports', 'Puzzle', 'Strategy', 'Adventure'];
-  bar.append(q,
+  F.append(wide,
     fieldOf('d.genre', mk('genre', [['', 'd.any'], ...GENRES.map(g => [g, g])])),
     fieldOf('d.rating', mk('minRating', [['0', 'd.any'], ['50', '50%+'], ['70', '70%+'], ['80', '80%+'], ['90', '90%+']])),
     fieldOf('d.players', mk('minPlayers', [['0', 'd.any'], ['10', '10+'], ['100', '100+'], ['1000', '1000+'], ['10000', '10000+']])),
     fieldOf('d.updated', mk('updatedDays', [['0', 'd.upd.any'], ['7', 'd.upd.7'], ['30', 'd.upd.30'], ['90', 'd.upd.90'], ['365', 'd.upd.365']])),
-    fieldOf('d.sort', mk('sort', [['players', 'd.s.players'], ['rating', 'd.s.rating'], ['updated', 'd.s.updated'], ['fav', 'd.s.fav']])), go);
-  W.append(bar, E('p', 'hint', t('d.hint')), out);
+    fieldOf('d.sort', mk('sort', [['players', 'd.s.players'], ['rating', 'd.s.rating'], ['updated', 'd.s.updated'], ['fav', 'd.s.fav']])));
+  W.append(F, E('p', 'hint', t('d.hint')), out);
   const run = async () => {
     dq.q = q.value; out.replaceChildren(E('p', 'hint', t('sv.loading')));
     const r = await api.discover({ ...dq });
@@ -177,35 +185,36 @@ function discoverGames() {
 
 /* ---------- лента обновлений ---------- */
 function newsPage() {
-  const W = E('div'), top = E('div', 'libbar'), feed = E('div'), src = E('details', 'src');
+  const W = E('div'), bar = E('div', 'toolbar'), feed = E('div'), src = E('details', 'group');
   const rf = E('button', 'btn', t('n.refresh')), rd = E('button', 'btn', t('n.read')), fl = E('select');
   for (const [v, l] of [['', t('n.all')], ...cfg.folders.map(f => [f.id, '▸ ' + f.name])]) { const o = E('option', null, l); o.value = v; fl.append(o); }
-  top.append(rf, rd, fl);
-  W.append(top, el({ t: 'toggle', k: 'newsNotify', l: 'n.notify' }), src, feed);
+  bar.append(fl, spacer(), rf, rd);
+  W.append(bar, feed, src, grp(null, el({ t: 'toggle', k: 'newsNotify', l: 'n.notify' })));
 
   const drawFeed = async () => {
     const [{ items, unread }, lib] = await Promise.all([api.newsGet(), api.libGet()]);
     newsBadge = unread; renderNav();
     const byId = Object.fromEntries(lib.map(p => [p.placeId, p]));
     const list = items.filter(i => !fl.value || (byId[i.placeId] && byId[i.placeId].folder === fl.value));
-    feed.replaceChildren();
-    if (!list.length) feed.append(E('p', 'hint', t('n.empty')));
+    const G = grp(null); feed.replaceChildren(G);
+    if (!list.length) G.body.append(E('p', 'ghint', t('n.empty')));
     for (const i of list) {
       const r = E('div', 'frow'), th = thumb(E('div', 'thumb'), i.icon), info = E('div', 'grow'), pl = E('button', 'btn', t('play'));
       info.append(E('b', null, i.name), E('small', null, [t('n.upd', { d: fdate(i.at) }), ago(i.at), i.playing != null ? t('n.playing', { n: i.playing.toLocaleString(cfg.language) }) : ''].filter(Boolean).join('  ·  ')));
       pl.onclick = () => { show('home'); play(startUri(i.placeId)); };
       r.append(th, info);
       if (i.unread) r.append(E('span', 'tag ok', t('n.new')));
-      r.append(pl); feed.append(r);
+      r.append(pl); G.body.append(r);
     }
   };
   const drawSources = async () => {
-    src.replaceChildren(E('summary', null, t('n.sources')), E('p', 'hint', t('n.sources.d')));
+    const body = E('div', 'gbody');
+    src.replaceChildren(E('summary', null, t('n.sources')), E('p', 'ghint', t('n.sources.d')), body);
     for (const p of await api.libGet()) {
       const on = p.news === true || (p.fav && p.news !== false), L = E('label', 'sw mini'), cb = E('input'), r = E('div', 'row');
       cb.type = 'checkbox'; cb.checked = on;
       cb.onchange = async () => { await api.libSet(p.placeId, { news: cb.checked }); drawFeed(); };
-      L.append(cb, E('i')); r.append(E('span', null, (p.fav ? '★ ' : '') + (p.name || p.placeId)), ctl(L)); src.append(r);
+      L.append(cb, E('i')); r.append(E('span', null, (p.fav ? '★ ' : '') + (p.name || p.placeId)), ctl(L)); body.append(r);
     }
   };
   rf.onclick = async () => { rf.disabled = true; rf.textContent = t('n.checking'); await api.newsCheck(); rf.disabled = false; rf.textContent = t('n.refresh'); drawFeed(); };
@@ -216,11 +225,11 @@ function newsPage() {
 
 /* ---------- друзья ---------- */
 function friendsPage() {
-  const W = E('div'), top = E('div', 'libbar'), body = E('div'), rf = E('button', 'btn', t('f.refresh'));
-  top.append(rf); W.append(top, body);
+  const W = E('div'), bar = E('div', 'toolbar'), body = E('div'), rf = E('button', 'btn', t('f.refresh'));
+  bar.style.justifyContent = 'flex-end'; bar.append(rf); W.append(bar, body);
   const row = (f, extra) => {
-    const r = E('div', 'frow'), img = E('img'), info = E('div', 'grow'), u = safeImg(f.avatar);
-    if (u) img.src = u;
+    const r = E('div', 'frow'), img = E('img'), info = E('div', 'grow');
+    img.src = avatarOf(f.display, f.avatar);
     info.append(E('b', null, f.display), E('small', null, '@' + f.name + (extra ? '  ·  ' + extra : '')));
     r.append(img, info); return r;
   };
@@ -237,13 +246,13 @@ function friendsPage() {
     if (s.length > 1) {
       const w = 600, h = 60, max = Math.max(1, ...s.map(x => x.online)), svg = SV('svg', { viewBox: `0 0 ${w} ${h + 6}`, class: 'chart' });
       svg.append(SV('polyline', { class: 'line', points: s.map((x, i) => `${(i / (s.length - 1) * w).toFixed(1)},${(h - x.online / max * h + 3).toFixed(1)}`).join(' ') }));
-      body.append(E('h3', null, t('f.chart')), svg);
+      body.append(grp(t('f.chart'), svg));
     }
     const groups = new Map();
     for (const f of inGame) { const k = f.game || f.location || String(f.placeId); (groups.get(k) || groups.set(k, []).get(k)).push(f); }
-    if (groups.size) body.append(E('h3', null, t('f.now')));
+    if (groups.size) body.append(E('h3', 'sect', t('f.now')));
     [...groups.entries()].sort((a, b) => b[1].length - a[1].length).forEach(([name, list]) => {
-      body.append(E('p', 'hint', `${name} (${list.length})`));
+      const G = grp(`${name} (${list.length})`);
       for (const f of list) {
         const rw = row(f, f.placeId ? '' : t('f.hidden'));
         if (isId(f.placeId)) {
@@ -251,12 +260,13 @@ function friendsPage() {
           jb.onclick = () => { show('home'); play(startUri(f.placeId, /^[0-9a-f-]{36}$/i.test(f.gameId || '') ? f.gameId : null)); };
           rw.append(jb);
         }
-        body.append(rw);
+        G.body.append(rw);
       }
+      body.append(G);
     });
-    if (online.length) { body.append(E('h3', null, t('f.online.l'))); online.forEach(f => body.append(row(f, f.location))); }
+    if (online.length) body.append(grp(t('f.online.l'), ...online.map(f => row(f, f.location))));
     const recent = fr.filter(f => f.type === 0 && f.lastOnline).sort((a, b) => Date.parse(b.lastOnline) - Date.parse(a.lastOnline)).slice(0, 15);
-    if (recent.length) { body.append(E('h3', null, t('f.recent'))); recent.forEach(f => body.append(row(f, ago(f.lastOnline)))); }
+    if (recent.length) body.append(grp(t('f.recent'), ...recent.map(f => row(f, ago(f.lastOnline)))));
   };
   rf.onclick = load; load(); return W;
 }
@@ -283,22 +293,21 @@ function statsCharts() {
     const tiles = E('div', 'tiles');
     for (const [l, v] of [[t('sa.today'), sum(1)], [t('sa.d7'), sum(7)], [t('sa.d30'), sum(30)], [t('sa.all'), total]]) { const x = E('div', 'tile'); x.append(E('b', null, fmtTime(v)), E('small', null, l)); tiles.append(x); }
     const rs = E('select'); for (const n of [7, 14, 30, 90]) { const o = E('option', null, String(n)); o.value = n; rs.append(o); }
-    rs.value = statRange;
+    rs.value = statRange; rs.style.width = '90px';
     const daily = E('div'), drawDaily = () => {
       const vals = [], labels = [];
       for (let i = statRange - 1; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); vals.push(s.days[key(d)] || 0); labels.push(String(d.getDate())); }
       daily.replaceChildren(bars(vals, labels));
     };
     rs.onchange = () => { statRange = +rs.value; drawDaily(); };
-    const head = E('div', 'row'); head.append(E('h3', null, t('sa.daily')), ctl(fieldOf('sa.range', rs)));
+    const head = E('div', 'row'); head.append(E('span', null, t('sa.range')), ctl(rs));
     drawDaily();
     const order = [1, 2, 3, 4, 5, 6, 0], wd = i => new Date(2024, 0, 7 + i).toLocaleDateString(cfg.language, { weekday: 'short' });
-    const top = Object.entries(s.byPlace).sort((a, b) => b[1] - a[1]).slice(0, 8), mx = top.length ? top[0][1] : 1, tb = E('div');
-    for (const [id, ms] of top) { const r = E('div', 'hbar'), i = E('i'); i.style.width = Math.max(2, ms / mx * 100) + '%'; const wrap = E('div'); wrap.append(i); r.append(E('span', null, names[id] || id), wrap, E('span', null, fmtTime(ms))); tb.append(r); }
-    W.append(tiles, head, daily,
-      E('h3', null, t('sa.hours')), bars(s.hours, s.hours.map((_, i) => String(i))),
-      E('h3', null, t('sa.dow')), bars(order.map(i => s.dow[i]), order.map(wd)),
-      E('h3', null, t('sa.top')), tb);
+    const top = Object.entries(s.byPlace).sort((a, b) => b[1] - a[1]).slice(0, 8), mx = top.length ? top[0][1] : 1, tb = grp(t('sa.top'));
+    for (const [id, ms] of top) { const r = E('div', 'hbar'), i = E('i'), wrap = E('div'); i.style.width = Math.max(2, ms / mx * 100) + '%'; wrap.append(i); r.append(E('span', null, names[id] || id), wrap, E('span', null, fmtTime(ms))); tb.body.append(r); }
+    W.append(tiles, grp(t('sa.daily'), head, daily),
+      grp(t('sa.hours'), bars(s.hours, s.hours.map((_, i) => String(i)))),
+      grp(t('sa.dow'), bars(order.map(i => s.dow[i]), order.map(wd))), tb);
   })();
   return W;
 }
@@ -312,7 +321,7 @@ function studioBox() {
     launch.disabled = open.disabled = !p;
     launch.onclick = () => api.studioLaunch(false);
     open.onclick = () => api.studioLaunch(true);
-    path_.onclick = async () => { cfg = await api.studioPath(); build('tools'); };
+    path_.onclick = async () => { cfg = await api.studioPath(); build('studio'); };
     dl.onclick = () => api.studioDownload();
     c.append(launch, open, path_); if (!p) c.append(dl);
     r.append(E('span', 'fname', p ? t('tl.found', { p }) : t('tl.nf')), c); W.append(r);
@@ -333,18 +342,24 @@ function integrityBox() {
   row.append(E('span'), c); W.append(row, res); return W;
 }
 
-PAGES.discover = () => [{ t: 'node', make: () => seg('discover', [['games', 'sg.games', discoverGames], ['servers', 'sg.servers', servers]]) }];
-PAGES.news = () => [{ t: 'node', make: newsPage }];
-PAGES.friends = () => [{ t: 'node', make: friendsPage }];
-PAGES.stats = () => [{ t: 'node', make: () => seg('stats', [['charts', 'sg.charts', statsCharts], ['history', 'sg.history', history]]) }];
-PAGES.tools = () => [
-  { h: 'tl.studio' }, { p: 'tl.studio.d' }, { t: 'node', make: studioBox },
-  { h: 'tl.itg' }, { p: 'tl.itg.d' }, { t: 'node', make: integrityBox }, tog('verifyOnLaunch', 'tl.vol'),
-];
+/* ---------- схемы страниц ---------- */
+const topPage = make => () => [{ t: 'node', raw: true, make }];
+PAGES.discover = topPage(() => seg('discover', [['games', 'sg.games', discoverGames], ['servers', 'sg.servers', servers]]));
+PAGES.news = topPage(newsPage);
+PAGES.people = topPage(() => seg('people', [['friends', 'nav.friends', friendsPage], ['accounts', 'nav.accounts', accounts]]));
+PAGES.stats = topPage(() => seg('stats', [['charts', 'sg.charts', statsCharts], ['history', 'sg.history', history]]));
+PAGES.tools = topPage(() => seg('tools', [['studio', 'nav.studio', sub('studio')], ['integrity', 'nav.integrity', sub('integrity')], ['overlay', 'nav.overlay', sub('overlay')]]));
+PAGES.settings = topPage(() => seg('settings', [['launcher', 'nav.launcher', sub('launcher')], ['updates', 'nav.updates', sub('updates')], ['mods', 'nav.mods', sub('mods')],
+  ['engine', 'nav.engine', sub('engine')], ['integr', 'nav.integr', sub('integr')], ['look', 'nav.look', sub('look')], ['links', 'nav.links', sub('links')]]));
+PAGES.studio = () => [{ h: 'tl.studio' }, { p: 'tl.studio.d' }, { t: 'node', make: studioBox }];
+PAGES.integrity = () => [{ h: 'tl.itg' }, { p: 'tl.itg.d' }, { t: 'node', make: integrityBox }, tog('verifyOnLaunch', 'tl.vol')];
 PAGES.overlay = () => [
+  { h: 'ov.g.main' },
   tog('overlay.enabled', 'ov.on'),
   sel_('overlay.corner', 'ov.corner', [['tl', 'c.tl'], ['tr', 'c.tr'], ['bl', 'c.bl'], ['br', 'c.br']]),
   rng('overlay.x', 'ov.x', 0, 400, 2, { u: 'px' }), rng('overlay.y', 'ov.y', 0, 400, 2, { u: 'px' }),
+  { t: 'btns', l: 'ov.preview', b: [{ l: 'ov.preview.b', fn: () => api.overlayPreview() }] },
+  { h: 'ov.g.look' },
   rng('overlay.scale', 'ov.scale', 60, 200, 5, { u: '%' }), rng('overlay.opacity', 'ov.opacity', 0, 100, 5, { u: '%' }),
   sel_('overlay.layout', 'ov.layout', [['column', 'lay.column'], ['row', 'lay.row']]), tog('overlay.labels', 'ov.labels'),
   sel_(null, 'ov.interval', [['500', '0.5 s'], ['1000', '1 s'], ['2000', '2 s']], { get: () => String(cfg.overlay.interval), set: v => save({ overlay: { interval: +v } }) }),
@@ -352,11 +367,12 @@ PAGES.overlay = () => [
   { h: 'ov.metrics' },
   ...METRICS.map(m => ({ t: 'toggle', l: 'ov.m.' + m, get: () => cfg.overlay.metrics.includes(m),
     set: v => save({ overlay: { metrics: METRICS.filter(x => (x === m ? v : cfg.overlay.metrics.includes(x))) } }) })),
+  { h: 'ov.g.fps' },
   { t: 'text', k: 'overlay.hotkey', l: 'ov.hotkey', ph: 'Control+Shift+O' },
   { t: 'text', k: 'overlay.presentMon', l: 'ov.pm', ph: 'C:\\Tools\\PresentMon.exe' },
   { t: 'text', k: 'overlay.pmArgs', l: 'ov.pmArgs' },
+  { h: 'k.adv' },
   { t: 'area', l: 'ov.css', live: true, get: () => cfg.overlay.css || '', set: v => save({ overlay: { css: v } }) },
-  { t: 'btns', l: 'ov.preview', b: [{ l: 'ov.preview.b', fn: () => api.overlayPreview() }] },
 ];
 
 /* ---------- живые обои ---------- */
@@ -425,3 +441,4 @@ function liveBg() {
 api.onNews(n => { newsBadge = n; renderNav(); });
 api.onItg(d => { if (itgEl) itgEl.textContent = `${Math.round(d.percent)}%  ${d.text}`; });
 setTimeout(async () => { try { newsBadge = (await api.newsGet()).unread; renderNav(); } catch {} }, 2000);
+let resizeT; addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { liveSig = ''; liveBg(); }, 200); });

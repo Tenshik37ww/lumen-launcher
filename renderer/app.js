@@ -1,7 +1,8 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const CIRC = 553;
-const NAV = ['home', 'library', 'accounts', 'servers', 'history', 'integr', 'launcher', 'mods', 'engine', 'look', 'links'];
+const NAV = ['home', 'library', 'discover', 'news', 'people', 'stats', 'tools', 'settings'];
+const subSlots = {};   // подстраницы внутри вкладок (настройки, инструменты…), которые перерисовываются по месту
 const THEMES = {
   'lumen-dark':  { bg: '#0b0e19', panel: '#121829', line: '#232b45', text: '#e9edff', mute: '#8d97b8', accent: '#ffb23e', danger: '#ff6b6b' },
   'lumen-light': { bg: '#f3f5fb', panel: '#ffffff', line: '#dbe0f0', text: '#161a2b', mute: '#626b8a', accent: '#e08a00', danger: '#d93f3f' },
@@ -45,6 +46,7 @@ function applyLook() {
   const u = cfg.ui, p = palette(), r = document.documentElement.style;
   for (const k of ['bg', 'panel', 'line', 'text', 'mute']) r.setProperty('--' + k, p[k]);
   r.setProperty('--accent', p.accent); r.setProperty('--bad', p.danger);
+  r.setProperty('--on-accent', lum(p.accent) > 0.55 ? '#111' : '#fff');
   document.documentElement.dataset.scheme = lum(p.bg) > 0.55 ? 'light' : 'dark';
   r.setProperty('--radius', u.radius + 'px'); r.setProperty('--fs', u.fs + 'px');
   r.setProperty('--ui-font', FONTS[u.font] || FONTS.system);
@@ -85,17 +87,33 @@ function moveIndicator() {
   ind.style.width = tab.offsetWidth + 'px'; ind.style.height = tab.offsetHeight + 'px';
   ind.style.transform = `translate(${tab.offsetLeft}px,${tab.offsetTop}px)`;
 }
+const ICONS = {
+  home: '<path d="M8 5.5v13l11-6.5z"/>',
+  library: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/>',
+  discover: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+  news: '<rect x="4" y="4.5" width="16" height="15" rx="2.2"/><path d="M8 9h8M8 12.5h8M8 16h5"/>',
+  people: '<circle cx="9" cy="8.5" r="3.4"/><path d="M2.8 19.5c0-3.4 2.8-5.7 6.2-5.7s6.2 2.3 6.2 5.7"/><circle cx="17" cy="9.5" r="2.5"/><path d="M17.2 14.2c2.6 0 4.2 1.8 4.2 4.8"/>',
+  stats: '<path d="M5 20v-8M12 20V5M19 20v-5"/>',
+  tools: '<rect x="3.5" y="8" width="17" height="11.5" rx="2.2"/><path d="M9 8V6.6A1.6 1.6 0 0 1 10.6 5h2.8A1.6 1.6 0 0 1 15 6.6V8M3.5 13.5h17"/>',
+  settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.1"/><circle cx="9" cy="17" r="2.1"/>',
+};
 function show(id) {
   current = id;
-  if ($('#' + id) && (['library', 'accounts', 'news', 'friends', 'stats', 'tools'].includes(id) || (id === 'discover' && pendingServer))) build(id);
+  if ($('#' + id) && (['library', 'news', 'people', 'stats'].includes(id) || (id === 'discover' && pendingServer))) build(id);
   $$('.tab').forEach(x => x.classList.toggle('on', x.dataset.view === id));
   $$('.view').forEach(v => v.classList.toggle('on', v.id === id));
   moveIndicator();
 }
 function renderNav() {
-  const rail = $('#rail');
-  if (!$$('.tab').length) for (const id of NAV) { const b = E('button', 'tab' + (id === 'integr' ? ' sep' : '')); b.dataset.view = id; b.onclick = () => show(id); rail.append(b); }
-  $$('.tab').forEach(b => { b.textContent = t('nav.' + b.dataset.view) + (b.dataset.view === 'news' && newsBadge ? ` (${newsBadge})` : ''); });
+  const list = $('#navlist');
+  if (!$$('.tab').length) for (const id of NAV) {
+    const b = E('button', 'tab' + (id === 'people' ? ' sep' : '') + (id === 'settings' ? ' bottom' : ''));
+    b.dataset.view = id; b.onclick = () => show(id);
+    b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[id] || ''}</svg>`;
+    b.append(E('span', 'tl'));
+    list.append(b);
+  }
+  $$('.tab').forEach(b => { b.querySelector('.tl').textContent = t('nav.' + b.dataset.view) + (b.dataset.view === 'news' && newsBadge ? ` (${newsBadge})` : ''); });
 }
 
 /* ---------- запуск ---------- */
@@ -175,10 +193,7 @@ const exclusive = (map, l, labels) => ({
 });
 
 const PAGES = {
-  library: () => [{ t: 'library' }],
-  accounts: () => [{ t: 'accounts' }],
-  servers: () => [{ t: 'servers' }],
-  history: () => [{ t: 'history' }],
+  library: () => [{ t: 'library', raw: true }],
   integr: () => [
     { h: 'i.act' },
     tog('activityTracking', 'i.track'),
@@ -192,17 +207,19 @@ const PAGES = {
     { h: 'i.custom' }, { p: 'i.custom.hint' }, { t: 'integ' },
   ],
   launcher: () => [
+    { h: 'g.main' },
     sel_('language', 'l.lang', [['ru', 'Русский'], ['en', 'English']], { set: v => { save({ language: v }); applyLang(); } }),
     { t: 'text', k: 'channel', l: 'l.channel', ph: 'LIVE', set: v => save({ channel: v.trim() || 'LIVE' }) },
-    tog('autoClose', 'l.auto'), tog('confirmSecond', 'l.confirm'), tog('backgroundUpdates', 'l.bg'),
-    { h: 'l.perf' }, sel_('priority', 'l.prio', [['normal', 'pr.normal'], ['above', 'pr.above'], ['high', 'pr.high']]), tog('multiInstance', 'l.multi'),
-    { h: 'l.dl' }, rng('dlConcurrency', 'l.conc', 1, 8, 1), tog('segmented', 'l.seg'),
+    tog('autoClose', 'l.auto'), tog('confirmSecond', 'l.confirm'), tog('multiInstance', 'l.multi'),
+    { h: 'g.rbx' }, tog('backgroundUpdates', 'l.bg'), rng('dlConcurrency', 'l.conc', 1, 8, 1), tog('segmented', 'l.seg'),
+    { h: 'l.perf' }, sel_('priority', 'l.prio', [['normal', 'pr.normal'], ['above', 'pr.above'], ['high', 'pr.high']]),
     { h: 'l.compat' }, tog('compat.fso', 'l.fso'), tog('compat.dpi', 'l.dpi'),
-    { h: 'l.clean' }, rng('cleanLogsDays', 'l.logs', 0, 30, 1),
+    { h: 'g.maint' }, rng('cleanLogsDays', 'l.logs', 0, 30, 1),
     { t: 'btns', l: 'l.cleanNow', b: [{ l: 'l.cleanNow.b', fn: async e => { const b = e.target, mb = await api.cleanCache(); b.textContent = t('cleaned', { s: mb }); setTimeout(() => { b.textContent = t('l.cleanNow.b'); }, 3000); } }] },
     { t: 'btns', l: 'l.re', b: [{ l: 'l.re.b', cls: 'danger', fn: async () => { await api.reset(); show('home'); play(); } }] },
   ],
   mods: () => [
+    { h: 'g.mods' },
     { t: 'btns', l: 'm.open', b: [{ l: 'm.open.b', fn: () => api.openMods() }] },
     tog('applyMods', 'm.apply'),
     { h: 'm.packs' }, { p: 'm.packs.hint' }, { t: 'packs' },
@@ -214,7 +231,7 @@ const PAGES = {
     { h: 'm.font' }, slot('font', 'm.font.l', { clearKey: 'm.font.clear' }),
   ],
   engine: () => [
-    tog('manageFlags', 'e.manage'),
+    { h: 'g.engine' }, tog('manageFlags', 'e.manage'),
     { h: 'e.gfx' },
     sel_(null, 'e.msaa', [['auto', 'auto'], ['1', '1x'], ['2', '2x'], ['4', '4x'], ['8', '8x']], {
       get: () => String(cfg.fastFlags[MSAA] ?? 'auto'), set: v => v === 'auto' ? setFlags({}, [MSAA]) : setFlags({ [MSAA]: +v }) }),
@@ -231,13 +248,14 @@ const PAGES = {
       set: v => v ? setFlags(Object.fromEntries(GRASS.map(k => [k, 0]))) : setFlags({}, GRASS) },
     { h: 'e.pre' }, ...PRESETS.map(flagToggle),
     { h: 'e.prof' }, { t: 'prof' },
+    { h: 'k.adv' },
     { t: 'area', l: 'e.json', get: () => JSON.stringify(cfg.fastFlags, null, 2),
       set: v => { const o = JSON.parse(v || '{}'); if (!isObj(o)) throw 0; save({ fastFlags: o }); build('engine'); } },
     { t: 'btns', l: 'e.reset', b: [{ l: 'e.reset.b', cls: 'danger', fn: () => { save({ fastFlags: {} }); build('engine'); } }] },
   ],
   look: () => [
-    sel_('ui.theme', 'k.theme', themeIds().map(x => [x, 'th.' + x]),
-      { set: v => { save({ ui: { theme: v } }); build('look'); } }),
+    { h: 'g.theme' },
+    { t: 'node', make: themeGallery },
     ...['bg', 'panel', 'line', 'text', 'mute', 'danger'].map(c => col('ui.colors.' + c, 'c.' + c, { show: () => cfg.ui.theme === 'custom' })),
     { t: 'accent', l: 'k.accent' },
     { h: 'k.l' }, { p: 'k.l.hint' },
@@ -276,9 +294,9 @@ const PAGES = {
     { t: 'area', l: 'k.json', get: () => JSON.stringify(uiOnly(cfg.ui), null, 1),
       set: v => { const o = JSON.parse(v); if (!isObj(o)) throw 0; const ok = {}; for (const k of Object.keys(uiOnly(cfg.ui))) if (k in o) ok[k] = o[k]; save({ ui: ok }); build('look'); } },
   ],
-  links: () => ['desktop', 'start', 'play', 'studio'].map(id => ({
+  links: () => [{ h: 'g.links' }, ...['desktop', 'start', 'play', 'studio'].map(id => ({
     t: 'toggle', l: 's.' + id, get: () => !!links[id], set: async v => { await api.setLink(id, v); links = await api.links(); build('links'); },
-  })),
+  }))],
 };
 
 function lab(it) {
@@ -378,22 +396,21 @@ const ctl = (...xs) => { const c = E('span', 'ctl'); c.append(...xs); return c; 
 
 // Подбор сервера (аналог Voidstrap Matchmaker): список серверов игры по пингу
 function servers() {
-  const W = E('div'), R = E('div', 'row'), i = E('input'), go = E('button', 'btn', t('sv.find')), out = E('div'), L = E('span');
+  const W = E('div'), bar = E('div', 'toolbar'), i = E('input'), go = E('button', 'btn primary', t('sv.find')), out = E('div');
   i.placeholder = t('sv.ph');
-  L.append(E('span', null, t('sv.l')), E('small', null, t('sv.l.d')));
-  R.append(L, ctl(i, go)); W.append(R, out);
+  bar.append(i, go); W.append(E('p', 'hint', t('sv.l.d')), bar, out);
   const run = async () => {
     out.replaceChildren(E('p', 'hint', t('sv.loading')));
     const r = await api.findServers(i.value);
     if (r.error) return out.replaceChildren(E('p', 'hint', t('sv.err.' + r.error)));
     if (!r.servers.length) return out.replaceChildren(E('p', 'hint', t('sv.none')));
-    out.replaceChildren(E('h3', null, r.name || r.placeId));
+    const G = grp(r.name || r.placeId); out.replaceChildren(G);
     r.servers.forEach((s, n) => {
-      const row = E('div', 'row'), info = E('span'), b = E('button', 'btn', t('sv.join'));
+      const row = E('div', 'row'), info = E('span'), b = E('button', 'btn' + (n === 0 ? ' primary' : ''), t('sv.join'));
       info.append(E('span', null, (s.ping != null ? t('sv.ping', { p: s.ping }) : '—') + (n === 0 ? '  ·  ' + t('sv.best') : '')),
         E('small', null, t('sv.players', { a: s.playing, b: s.max }) + (s.fps ? `  ·  ${Math.round(s.fps)} FPS` : '')));
       b.onclick = () => { show('home'); play(`roblox://experiences/start?placeId=${r.placeId}&gameInstanceId=${s.id}`); };
-      row.append(info, ctl(b)); out.append(row);
+      row.append(info, ctl(b)); G.body.append(row);
     });
   };
   go.onclick = run; i.onkeydown = e => { if (e.key === 'Enter') run(); };
@@ -407,19 +424,24 @@ function history() {
   const draw = async () => {
     const h = await api.history();
     W.replaceChildren();
-    const top = E('div', 'row'), clr = E('button', 'btn danger', t('h.clear'));
-    clr.onclick = async () => { await api.clearHistory(); draw(); };
-    top.append(E('span', null, t('h.l')), ctl(clr)); W.append(top);
-    if (!h.length) W.append(E('p', 'hint', t('h.empty')));
+    const G = grp(t('h.l'));
+    if (!h.length) G.body.append(E('p', 'ghint', t('h.empty')));
+    else {
+      const bar = E('div', 'toolbar'), clr = E('button', 'btn danger', t('h.clear'));
+      bar.style.justifyContent = 'flex-end';
+      clr.onclick = async () => { await api.clearHistory(); draw(); };
+      bar.append(clr); W.append(bar);
+    }
     for (const e of h) {
       const r = E('div', 'row'), info = E('span'), mins = e.end ? Math.max(1, Math.round((e.end - e.start) / 60000)) : null;
       info.append(E('span', null, e.name || e.placeId),
         E('small', null, [new Date(e.start).toLocaleString(cfg.language), mins && t('h.min', { m: mins }), e.location].filter(Boolean).join('  ·  ')));
-      const a = E('button', 'btn', t('h.again')), s = E('button', 'btn', t('h.same'));
+      const a = E('button', 'btn', t('h.again')), s2 = E('button', 'btn', t('h.same'));
       a.onclick = () => { show('home'); play(`roblox://experiences/start?placeId=${e.placeId}`); };
-      s.onclick = () => { show('home'); play(`roblox://experiences/start?placeId=${e.placeId}&gameInstanceId=${e.jobId}`); };
-      r.append(info, ctl(a, s)); W.append(r);
+      s2.onclick = () => { show('home'); play(`roblox://experiences/start?placeId=${e.placeId}&gameInstanceId=${e.jobId}`); };
+      r.append(info, ctl(a, s2)); G.body.append(r);
     }
+    W.append(G);
   };
   draw(); return W;
 }
@@ -470,6 +492,8 @@ function prof() {
 /* ---------- библиотека ---------- */
 const fmtTime = ms => { const m = Math.floor((ms || 0) / 60000); if (m < 1) return t('t.lt'); const h = Math.floor(m / 60); return h ? t('t.hm', { h, m: m % 60 }) : t('t.m', { m }); };
 const safeImg = u => (typeof u === 'string' && /^https:\/\/[^"'\s)]+$/.test(u)) ? u : null;
+// аватар: картинка Roblox или кружок с первой буквой, пока картинки нет
+const avatarOf = (name, url) => safeImg(url) || ('data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#8d97b8" fill-opacity=".35"/><text x="32" y="43" font-size="30" text-anchor="middle" fill="#8d97b8" font-family="sans-serif" font-weight="600">${String(name || '?').charAt(0).toUpperCase().replace(/[<>&"]/g, '?')}</text></svg>`));
 
 /* ---------- аккаунты ---------- */
 function renderAccChip() {
@@ -480,8 +504,8 @@ function renderAccChip() {
   const o0 = E('option', null, t('acc.sys')); o0.value = ''; s.append(o0);
   for (const a of list) { const o = E('option', null, a.display + (a.expired ? ' ⚠' : '')); o.value = a.id; s.append(o); }
   s.value = cfg.activeAccount || '';
-  const act = list.find(a => a.id === cfg.activeAccount), img = safeImg(act && act.avatar);
-  $('#accImg').hidden = !img; if (img) $('#accImg').src = img;
+  const act = list.find(a => a.id === cfg.activeAccount);
+  $('#accImg').hidden = !act; if (act) $('#accImg').src = avatarOf(act.display, act.avatar);
   s.onchange = () => { save({ activeAccount: s.value || null }); renderAccChip(); };
 }
 
@@ -489,19 +513,21 @@ function accounts() {
   const W = E('div');
   const draw = () => {
     W.replaceChildren(E('p', 'hint', t('acc.note')), E('p', 'hint', t('acc.sec')));
-    const top = E('div', 'row'), add = E('button', 'btn', t('acc.add'));
+    const bar = E('div', 'toolbar'), add = E('button', 'btn primary', t('acc.add'));
+    bar.style.justifyContent = 'flex-end';
     add.onclick = async () => { add.disabled = true; cfg = await api.addAccount(); renderAccChip(); draw(); };
-    top.append(E('span', null, t('acc.cur')), ctl(add)); W.append(top);
+    bar.append(add); W.append(bar);
+    const G = grp(t('acc.cur')); W.append(G);
 
     const sys = E('div', 'row'), useSys = E('button', 'btn', t('acc.use'));
     useSys.disabled = !cfg.activeAccount;
     useSys.onclick = () => { save({ activeAccount: null }); renderAccChip(); draw(); };
-    sys.append(E('span', null, t('acc.sys')), ctl(E('span', 'tag ok', cfg.activeAccount ? '' : t('acc.active')), useSys)); W.append(sys);
+    sys.append(E('span', null, t('acc.sys')), ctl(E('span', 'tag ok', cfg.activeAccount ? '' : t('acc.active')), useSys)); G.body.append(sys);
 
-    if (!cfg.accounts.length) W.append(E('p', 'hint', t('acc.none')));
+    if (!cfg.accounts.length) G.body.append(E('p', 'ghint', t('acc.none')));
     for (const a of cfg.accounts) {
-      const r = E('div', 'row'), who = E('span', 'who'), info = E('span'), img = E('img'), src = safeImg(a.avatar);
-      if (src) img.src = src;
+      const r = E('div', 'row'), who = E('span', 'who'), info = E('span'), img = E('img');
+      img.src = avatarOf(a.display, a.avatar);
       info.append(E('span', null, a.display), E('small', null, '@' + a.name));
       who.append(img, info);
       const st = E('span', 'tag ' + (a.expired ? 'bad' : 'ok'), a.expired ? t('acc.expired') : (a.id === cfg.activeAccount ? t('acc.active') : ''));
@@ -510,19 +536,63 @@ function accounts() {
       use.onclick = () => { save({ activeAccount: a.id }); renderAccChip(); draw(); };
       re.onclick = async () => { re.disabled = true; cfg = await api.addAccount(); renderAccChip(); draw(); };
       rm.onclick = async () => { cfg = await api.removeAccount(a.id); renderAccChip(); draw(); };
-      r.append(who, ctl(st, use, re, rm)); W.append(r);
+      r.append(who, ctl(st, use, re, rm)); G.body.append(r);
     }
   };
   draw(); return W;
 }
 
-function vis() { for (const [n, it] of vlist) n.hidden = !it.show(); }
-function build(id) {
-  const s = $('#' + id), st = s.scrollTop;
-  s.innerHTML = ''; s.append(E('h2', null, t('nav.' + id)));
+// галерея тем: превью цветов вместо выпадающего списка
+function themeGallery() {
+  const W = E('div', 'themes');
+  for (const id of themeIds()) {
+    const th = THEMES[id] || (id === 'system' ? THEMES['lumen-dark'] : { ...THEMES['lumen-dark'], ...cfg.ui.colors });
+    const b = E('button', 'theme' + (cfg.ui.theme === id ? ' on' : '')), pv = E('div', 'tprev'), panel = E('i'), dot = E('i');
+    pv.style.background = id === 'system' ? `linear-gradient(90deg, ${THEMES['lumen-dark'].bg} 50%, ${THEMES['lumen-light'].bg} 50%)` : th.bg;
+    panel.style.background = id === 'system' ? `linear-gradient(90deg, ${THEMES['lumen-dark'].panel} 50%, ${THEMES['lumen-light'].panel} 50%)` : th.panel;
+    dot.style.background = th.accent;
+    pv.append(panel, dot); b.append(pv, E('span', null, t('th.' + id)));
+    b.onclick = () => { save({ ui: { theme: id } }); build('look'); };
+    W.append(b);
+  }
+  return W;
+}
+// карточка-группа: заголовок и тело; тело доступно как g.body
+function grp(title, ...kids) {
+  const g = E('section', 'group'), b = E('div', 'gbody');
+  if (title) g.append(E('h3', null, title));
+  g.append(b); b.append(...kids); g.body = b;
+  return g;
+}
+const subtitle = id => t('pg.' + id);
+// страница по схеме: заголовок {h} начинает новую карточку, {p} становится подсказкой карточки, raw выводится без карточки
+function renderPage(id) {
+  const root = E('div', 'page');
+  let g = null;
   vlist = vlist.filter(x => x[2] !== id);
-  for (const it of PAGES[id]()) { const n = el(it); if (it.show) vlist.push([n, it, id]); s.append(n); }
-  s.scrollTop = st; vis();
+  const open = title => { g = grp(title); root.append(g); };
+  for (const it of PAGES[id]()) {
+    if (it.h) { open(t(it.h)); continue; }
+    if (it.raw) { const n = el(it); if (it.show) vlist.push([n, it, id]); root.append(n); g = null; continue; }
+    if (!g) open(null);
+    if (it.p) { g.insertBefore(E('p', 'ghint', t(it.p)), g.body); continue; }
+    const n = el(it);
+    if (it.show) vlist.push([n, it, id]);
+    g.body.append(n);
+  }
+  return root;
+}
+function vis() {
+  for (const [n, it] of vlist) n.hidden = !it.show();
+  $$('.group').forEach(g => { if (g.body) g.hidden = g.body.children.length > 0 && [...g.body.children].every(c => c.hidden); });
+}
+function build(id) {
+  const slot = subSlots[id] && subSlots[id].isConnected ? subSlots[id] : null, host = slot || $('#' + id);
+  if (!host) return;
+  const sc = (host.closest && host.closest('.view')) || host, st = sc.scrollTop;
+  if (slot) host.replaceChildren(renderPage(id));
+  else { const hd = E('div', 'phead'), L = E('div'); L.append(E('h1', null, t('nav.' + id)), E('p', 'psub', subtitle(id))); hd.append(L); host.replaceChildren(hd, renderPage(id)); }
+  sc.scrollTop = st; vis();
 }
 function applyLang() {
   document.documentElement.lang = cfg.language;
@@ -550,4 +620,5 @@ async function init() {
   show('home');
   verState = await api.latest(); setVer();
 }
-init();
+// запуск только после выполнения всех скриптов (pages2.js, updates.js дополняют NAV и PAGES)
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();

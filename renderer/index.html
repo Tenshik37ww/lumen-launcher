@@ -15,9 +15,17 @@
       <button data-win="close" aria-label="Close">&#10005;</button>
     </div>
   </header>
-  <nav class="rail" id="rail"><span class="indicator"></span></nav>
+
+  <nav class="rail" id="rail">
+    <span class="indicator"></span>
+    <div class="navlist" id="navlist"></div>
+    <div class="railfoot">
+      <div id="updbar" class="updbar" hidden><span id="updtxt"></span><button id="updbtn" class="btn primary"></button></div>
+      <div id="accchip" class="accchip" hidden><img id="accImg" alt="" hidden><select id="accSel" aria-label="Account"></select></div>
+    </div>
+  </nav>
+
   <main id="pages">
-    <div id="updbar" class="updbar" hidden><span id="updtxt"></span><button id="updbtn" class="btn primary"></button></div>
     <section id="home" class="view on">
       <div class="stage">
         <svg class="ring" viewBox="0 0 200 200" aria-hidden="true">
@@ -29,7 +37,6 @@
       <div class="barwrap"><div id="barfill"></div></div>
       <p id="status" class="status" aria-live="polite"></p>
       <p id="ver" class="ver"></p>
-      <div id="accchip" class="accchip" hidden><img id="accImg" alt="" hidden><select id="accSel" aria-label="Account"></select></div>
       <div id="act" class="act" hidden>
         <img id="actIcon" alt="">
         <div><b id="actName"></b><small id="actInfo"></small></div>

@@ -79,7 +79,7 @@ async function applyCss(css) {
 function createWindow() {
   const ui = B.loadConfig().ui;
   win = new BrowserWindow({
-    width: 960, height: 620, frame: false, resizable: false, show: false,
+    width: 1100, height: 720, minWidth: 940, minHeight: 620, frame: false, resizable: true, show: false,
     backgroundColor: bgColor(), icon: iconImage() || undefined,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true },
   });

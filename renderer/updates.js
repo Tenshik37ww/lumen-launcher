@@ -41,13 +41,12 @@ function updateBox() {
   updBox.paint();
   return W;
 }
-const launcherPageBase = PAGES.launcher;
-PAGES.launcher = () => [
+PAGES.updates = () => [
   { h: 'u.h' }, { t: 'node', make: updateBox },
+  { h: 'u.g.auto' },
   tog('autoUpdateCheck', 'u.check'),
   sel_('updateMode', 'u.mode', [['notify', 'u.mode.notify'], ['auto', 'u.mode.auto']]),
   tog('updatePrerelease', 'u.pre'),
-  ...launcherPageBase(),
 ];
 api.onUpdate(s => { updState = s; paintUpdate(); });
 api.updateGet().then(s => { updState = s; paintUpdate(); });
