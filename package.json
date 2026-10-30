@@ -1,6 +1,6 @@
 {
   "name": "lumen-launcher",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Lumen — альтернативный лаунчер Roblox",
   "main": "main.js",
   "scripts": {
