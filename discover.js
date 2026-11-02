@@ -4,8 +4,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const B = require('./bootstrapper');
+const { xfetch } = require('./http');
 
-const j = async u => { const r = await fetch(u, { signal: AbortSignal.timeout(10000) }); if (!r.ok) throw new Error(String(r.status)); return r.json(); };
+const j = async u => { const r = await xfetch(u, { signal: AbortSignal.timeout(10000) }); if (!r.ok) throw new Error(String(r.status)); return r.json(); };
 const chunk = (a, n) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n));
 const num = v => (/^\d+$/.test(String(v)) ? String(v) : null);
 
@@ -97,4 +98,32 @@ function getFeed() {
   return { items, unread: items.filter(i => i.unread).length };
 }
 function markRead() { const n = loadNews(); n.items.forEach(i => { i.unread = false; }); saveNews(n); }
-module.exports = { search, enrich, collect, checkNews, getFeed, markRead };
+
+// подробная карточка игры: описание, автор, статистика, даты, скриншоты
+async function gameDetails(placeId) {
+  const pid = num(placeId);
+  if (!pid) return { error: 'bad' };
+  let uid;
+  try { uid = num((await j(`https://apis.roblox.com/universes/v1/places/${pid}/universe`)).universeId); } catch { return { error: 'net' }; }
+  if (!uid) return { error: 'nf' };
+  let g;
+  try { g = await j(`https://games.roblox.com/v1/games?universeIds=${uid}`); } catch { return { error: 'net' }; }
+  const d = (g.data || [])[0];
+  if (!d) return { error: 'nf' };
+  const [votes, icon, shots, fav] = await Promise.all([
+    j(`https://games.roblox.com/v1/games/votes?universeIds=${uid}`).catch(() => null),
+    j(`https://thumbnails.roblox.com/v1/games/icons?universeIds=${uid}&returnPolicy=PlaceHolder&size=256x256&format=Png&isCircular=false`).catch(() => null),
+    j(`https://thumbnails.roblox.com/v1/games/multiget/thumbnails?universeIds=${uid}&countPerUniverse=6&defaults=true&size=768x432&format=Png&isCircular=false`).catch(() => null),
+    j(`https://games.roblox.com/v1/games/${uid}/favorites/count`).catch(() => null),
+  ]);
+  const v = votes && votes.data && votes.data[0], th = shots && shots.data && shots.data[0] && shots.data[0].thumbnails;
+  return {
+    universeId: uid, placeId: String(d.rootPlaceId || pid), name: d.name, description: String(d.description || '').slice(0, 2500),
+    creator: d.creator ? { name: d.creator.name, type: d.creator.type, verified: !!d.creator.hasVerifiedBadge } : null,
+    playing: d.playing || 0, visits: d.visits || 0, favorites: fav && fav.favoritesCount != null ? fav.favoritesCount : d.favoritedCount || 0, max: d.maxPlayers,
+    genre: d.genre_l1 || d.genre || '', genre2: d.genre_l2 || '', created: d.created, updated: d.updated, price: d.price,
+    up: v && v.upVotes, down: v && v.downVotes, rating: v && v.upVotes + v.downVotes > 0 ? Math.round(v.upVotes / (v.upVotes + v.downVotes) * 100) : null,
+    icon: icon && icon.data && icon.data[0] && icon.data[0].imageUrl, shots: (th || []).map(x => x.imageUrl).filter(Boolean),
+  };
+}
+module.exports = { search, enrich, collect, checkNews, getFeed, markRead, gameDetails };

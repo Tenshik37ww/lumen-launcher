@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, nativeTheme, Tray, Menu, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, nativeTheme, Tray, Menu, Notification, session } = require('electron');
+const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const B = require('./bootstrapper');
@@ -7,18 +8,21 @@ const Accounts = require('./accounts');
 const Discover = require('./discover');
 const Overlay = require('./overlay');
 const Updater = require('./updater');
+const Fx = require('./screenfx');
+const Diag = require('./diag');
 const { findServers, placeInfo } = require('./activity');
 const { dot } = require('./png');
 const { t } = require('./lang');
 
 const PROTOS = ['roblox-player', 'roblox'];
 const uriFrom = argv => argv.find(a => PROTOS.some(p => a.startsWith(p + ':')));
-const bootFrom = argv => { const uri = uriFrom(argv); return (uri || argv.includes('--play')) ? { uri: uri || null } : null; };
+const bootFrom = argv => {
+  if (argv.includes('--bigpicture')) return { bigpicture: true }; const uri = uriFrom(argv); return (uri || argv.includes('--play')) ? { uri: uri || null } : null; };
 const T = (k, p) => t(B.loadConfig().language, k, p);
 let win, tray = null, busy = false, sessionActive = false, quitting = false, cssKey = null;
 
 if (!app.requestSingleInstanceLock()) app.quit();
-app.on('before-quit', () => { quitting = true; B.releaseMutex(); Overlay.stop(); });
+app.on('before-quit', () => { quitting = true; B.releaseMutex(); Overlay.stop(); Fx.stop(); Accounts.flushAll(); });
 app.on('second-instance', (_, argv) => {
   if (argv.includes('--studio')) { B.launchStudio(); return; }
   if (!win) return;
@@ -104,7 +108,11 @@ function hideToTray() {
   win.hide();
 }
 
-app.whenReady().then(() => {
+const applyProxy = () => { const p = B.loadConfig().proxy; return session.defaultSession.setProxy(p ? { proxyRules: p } : { mode: 'system' }).catch(() => {}); };
+const materialSupported = () => process.platform === 'win32' && parseInt(String(os.release()).split('.')[2], 10) >= 22621;
+
+app.whenReady().then(async () => {
+  await applyProxy();
   if (process.argv.includes('--studio')) { B.launchStudio(); app.quit(); return; }
   registerProtocols(); createWindow();
   Updater.start(() => win);
@@ -123,10 +131,19 @@ app.on('window-all-closed', () => app.quit());
 
 /* ---- IPC ---- */
 ipcMain.handle('cfg:get', () => B.loadConfig());
-ipcMain.handle('cfg:set', (_, patch) => B.saveConfig(patch));
+ipcMain.handle('cfg:set', async (_, patch) => { const r = B.saveConfig(patch); if (patch && 'proxy' in patch) await applyProxy(); return r; });
 ipcMain.handle('latest', async () => { try { return await B.getLatest(B.loadConfig().channel); } catch (e) { return { error: e.message }; } });
 
-ipcMain.handle('launch', async (_, rawUri) => {
+// запуск клиента: при выбранном аккаунте — с одноразовым билетом этого аккаунта (только для запуска конкретной игры)
+async function startRoblox(uri, cfg0, noAccount) {
+  if (cfg0.multiInstance) await B.holdMutex();
+  let launchUri = uri;
+  const pm = uri && /^roblox:\/\/experiences\/start\?placeId=(\d+)(?:&gameInstanceId=([0-9a-f-]{36}))?$/i.exec(uri);
+  const acc = noAccount ? null : (cfg0.accounts || []).find(a => a.id === cfg0.activeAccount);
+  if (pm && acc) launchUri = await Accounts.ticketUri(acc, pm[1], pm[2]);
+  B.launch(launchUri);
+}
+ipcMain.handle('launch', async (_, rawUri, opts) => {
   if (busy) return { ok: false, error: T('busy') };
   const uri = rawUri ? B.safeUri(rawUri) : null;
   if (rawUri && !uri) return { ok: false, error: T('err.uri') };
@@ -140,30 +157,28 @@ ipcMain.handle('launch', async (_, rawUri) => {
     }
     const { update } = await B.ensure(send);
     send({ percent: 100, text: T('starting') });
-    if (cfg0.multiInstance) await B.holdMutex();
-    // активный аккаунт: запуск конкретной игры идёт с одноразовым билетом этого аккаунта
-    let launchUri = uri;
-    const pm = uri && /^roblox:\/\/experiences\/start\?placeId=(\d+)(?:&gameInstanceId=([0-9a-f-]{36}))?$/i.exec(uri);
-    const acc = (cfg0.accounts || []).find(a => a.id === cfg0.activeAccount);
-    if (pm && acc) {
-      try { launchUri = await Accounts.ticketUri(acc, pm[1], pm[2]); }
-      catch (e) {
-        const expired = e.message === 'expired';
-        if (expired) B.saveConfig({ accounts: cfg0.accounts.map(a => a.id === acc.id ? { ...a, expired: true } : a) });
-        return { ok: false, error: T(expired ? 'acc.err.expired' : 'acc.err.ticket') };
-      }
+    try { await startRoblox(uri, B.loadConfig(), !!(opts && opts.noAccount)); }
+    catch (e) {
+      const expired = e.message === 'expired', accErr = expired || e.message === 'ticket';
+      if (expired) { const c2 = B.loadConfig(); B.saveConfig({ accounts: c2.accounts.map(a => (a.id === c2.activeAccount ? { ...a, expired: true } : a)) }); }
+      return { ok: false, error: accErr ? T(expired ? 'acc.err.expired' : 'acc.err.ticket') : e.message, accError: accErr };
     }
-    B.launch(launchUri);
     const cfg = B.loadConfig();
     if (cfg.overlay.enabled) Overlay.start({ session: true });
+    if (cfg.fx.enabled) Fx.start({ session: true });
     const s = Session.start({
       cfg, update,
+      relaunch: (placeId, jobId) => startRoblox(`roblox://experiences/start?placeId=${placeId}` + (jobId ? `&gameInstanceId=${jobId}` : ''), B.loadConfig(), false),
+      status: info => {
+        if (win) win.webContents.send('reconnect', info);
+        if (info && ['reconnect', 'giveup'].includes(info.type)) { try { new Notification({ title: 'Lumen', body: T(info.type === 'reconnect' ? 'rc.try' : 'rc.giveup', { n: info.n, m: info.max }) }).show(); } catch {} }
+      },
       notify: a => {
         win.webContents.send('activity', a);
         Overlay.setSession(a);
         if (a && a.location && cfg.notifyServer) { try { new Notification({ title: a.name || 'Roblox', body: T('srv', { l: a.location }) }).show(); } catch {} }
       },
-      onFinish: () => { sessionActive = false; Overlay.endSession(); cfg.autoClose ? (quitting = true, app.quit()) : showWin(); },
+      onFinish: () => { sessionActive = false; Overlay.endSession(); Fx.endSession(); cfg.autoClose ? (quitting = true, app.quit()) : showWin(); },
     });
     if (s.background) { sessionActive = true; if (cfg.autoClose) setTimeout(hideToTray, 1500); }
     else if (cfg.autoClose) setTimeout(() => app.quit(), 2500);
@@ -218,7 +233,7 @@ ipcMain.handle('studio:download', () => shell.openExternal('https://www.roblox.c
 ipcMain.handle('integrity:run', async (_, mode) => {
   const cfg = B.loadConfig();
   if (!cfg.installed) return { error: 'noinst' };
-  const dir = path.join(B.P.versions, cfg.installed), send = p => win.webContents.send('itg', p);
+  const dir = B.installDir(cfg) || path.join(B.P.versions, cfg.installed), send = p => win.webContents.send('itg', p);
   try {
     send({ percent: 0, text: T('itg.run') });
     const r = await B.verifyIntegrity(dir, mode !== 'quick', send);
@@ -239,6 +254,13 @@ ipcMain.handle('bgv:get', () => {
   const f = assetPath(B.loadConfig().ui.bgVideo);
   return f && fs.existsSync(f) ? { type: f.endsWith('.webm') ? 'video/webm' : 'video/mp4', data: fs.readFileSync(f) } : null;
 });
+ipcMain.handle('acc:check', () => Accounts.checkAll());
+ipcMain.handle('details:get', (_, id) => Discover.gameDetails(id));
+ipcMain.handle('badges:get', (_, universeId) => { const c = B.loadConfig(); return Accounts.gameBadges(c.accounts.find(a => a.id === c.activeAccount) || null, universeId); });
+ipcMain.handle('diag:run', () => Diag.run());
+ipcMain.handle('fx:preview', () => { Fx.preview(8000); return true; });
+ipcMain.handle('win:fullscreen', (_, on) => { win.setFullScreen(!!on); return true; });
+ipcMain.handle('sys:info', () => ({ material: materialSupported() }));
 ipcMain.handle('servers:find', (_, q) => findServers(q));
 ipcMain.handle('history:get', () => B.loadHistory());
 ipcMain.handle('history:clear', () => { B.saveHistory([]); return true; });
@@ -288,7 +310,7 @@ ipcMain.handle('css:apply', (_, css) => applyCss(String(css || '')));
 ipcMain.on('win:look', (_, { opacity, material, bg }) => {
   try {
     win.setOpacity(Math.min(1, Math.max(.5, (+opacity || 100) / 100)));
-    if (['mica', 'acrylic'].includes(material)) { win.setBackgroundColor('#00000000'); win.setBackgroundMaterial(material); }
+    if (['mica', 'acrylic'].includes(material) && materialSupported()) { win.setBackgroundColor('#00000000'); win.setBackgroundMaterial(material); }
     else { if (win.setBackgroundMaterial) win.setBackgroundMaterial('none'); win.setBackgroundColor(bg || '#0b0e19'); }
   } catch {}
 });

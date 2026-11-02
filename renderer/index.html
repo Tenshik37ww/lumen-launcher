@@ -11,6 +11,8 @@
   <header class="bar">
     <span class="brandwrap"><img id="brandIcon" alt="" hidden><span class="brand" id="brand">Lumen</span></span>
     <div class="win">
+      <button id="btnSearch" class="iconbtn" aria-label="Search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></button>
+      <button id="btnBP" class="iconbtn" aria-label="Big Picture"><svg viewBox="0 0 24 24"><rect x="2.5" y="7" width="19" height="10.5" rx="5"/><path d="M7.5 10v4M5.5 12h4M16 11.2h.01M18 13.2h.01"/></svg></button>
       <button data-win="min" aria-label="Minimize">&#8211;</button>
       <button data-win="close" aria-label="Close">&#10005;</button>
     </div>
@@ -21,7 +23,9 @@
     <div class="navlist" id="navlist"></div>
     <div class="railfoot">
       <div id="updbar" class="updbar" hidden><span id="updtxt"></span><button id="updbtn" class="btn primary"></button></div>
-      <div id="accchip" class="accchip" hidden><img id="accImg" alt="" hidden><select id="accSel" aria-label="Account"></select></div>
+      <div id="accchip" hidden>
+        <button id="accBtn" class="accbtn" aria-haspopup="menu"><img id="accImg" alt=""><span id="accName"></span><svg viewBox="0 0 12 8"><path d="M1 1.5l5 5 5-5"/></svg></button>
+      </div>
     </div>
   </nav>
 
@@ -32,20 +36,41 @@
           <circle class="track" cx="100" cy="100" r="88"/>
           <circle id="arc" class="arc intro" cx="100" cy="100" r="88"/>
         </svg>
+        <div class="ind" aria-hidden="true">
+          <div class="i-orbit"><b class="pct"></b></div>
+          <div class="i-pulse"><i></i><i></i><i></i><b class="pct"></b></div>
+          <div class="i-dots"><i></i><i></i><i></i></div>
+          <div class="i-seg"></div>
+          <svg class="i-gauge" viewBox="0 0 200 112"><path class="gtrack" d="M20 100 A80 80 0 0 1 180 100"/><path id="garc" class="garc" d="M20 100 A80 80 0 0 1 180 100"/><text class="pct" x="100" y="96" text-anchor="middle"></text></svg>
+          <div class="i-eq"></div>
+          <div class="i-pct"><b class="pct"></b></div>
+        </div>
         <button id="play" class="play"><span id="playLabel"></span></button>
       </div>
       <div class="barwrap"><div id="barfill"></div></div>
       <p id="status" class="status" aria-live="polite"></p>
+      <button id="noacc" class="btn" hidden></button>
       <p id="ver" class="ver"></p>
       <div id="act" class="act" hidden>
         <img id="actIcon" alt="">
         <div><b id="actName"></b><small id="actInfo"></small></div>
       </div>
     </section>
+    <section id="detail" class="view"></section>
   </main>
+
+  <div id="accmenu" class="accmenu" role="menu" hidden></div>
+  <div id="palette" class="palette" hidden><div class="pbox"><input id="pinput" autocomplete="off" spellcheck="false"><div class="pres" id="pres"></div></div></div>
+  <div id="bp" class="bp" hidden></div>
+
   <script src="../lang.js"></script>
   <script src="app.js"></script>
   <script src="pages2.js"></script>
   <script src="updates.js"></script>
+  <script src="pages3.js"></script>
+  <script src="detail.js"></script>
+  <script src="search.js"></script>
+  <script src="gamepad.js"></script>
+  <script src="bigpicture.js"></script>
 </body>
 </html>

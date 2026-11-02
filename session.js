@@ -17,8 +17,9 @@ function activityFor(s, cfg) {
   };
 }
 
-function start({ cfg, update, notify, onFinish }) {
-  const launchedAt = Date.now(), procs = [];
+function start({ cfg, update, notify, onFinish, relaunch, status }) {
+  let launchedAt = Date.now(), lastGame = null, reconnects = 0, reconnecting = false, stable = null;
+  const procs = [];
   const bg = update ? update().catch(() => {}) : null;
 
   for (const it of cfg.integrations || []) {
@@ -41,6 +42,9 @@ function start({ cfg, update, notify, onFinish }) {
         B.addHistory({ placeId: s.placeId, jobId: s.jobId, name: info.name, icon: info.icon, location: loc, start: st.since });
         B.libStart(s.placeId, info);
         notify(st);
+        lastGame = { placeId: s.placeId, jobId: s.jobId };
+        clearTimeout(stable); stable = setTimeout(() => { reconnects = 0; }, 120000);   // стабильная игра сбрасывает счётчик попыток
+        if (status) status(null);
         if (rpc) rpc.setActivity(activityFor(st, cfg));
       } else {
         B.endHistory();
@@ -48,12 +52,32 @@ function start({ cfg, update, notify, onFinish }) {
         notify(null);
         if (rpc) rpc.setActivity(null);
         if (cfg.closeOnLeave) setTimeout(B.killRoblox, 1500);
+        else if (cfg.autoReconnect && lastGame && (cfg.reconnectMode === 'any' || s.error)) setTimeout(maybeReconnect, 8000);
       }
     });
     watcher.start();
   }
 
-  const background = !!(watcher || bg || cfg.overlay.enabled || cfg.priority !== 'normal' || procs.some(x => x.it.autoClose));
+  // автопереподключение: клиент ещё запущен, но игра оборвалась из-за ошибки сети (или любой выход в режиме «any»)
+  async function maybeReconnect() {
+    if (reconnecting || !lastGame || !relaunch) return;
+    if (watcher && watcher.s) return;                        // уже идёт новый вход: телепорт или ручной запуск
+    if (!(await B.robloxRunning())) return;                  // клиент закрыт: игрок вышел сам
+    if (reconnects >= cfg.reconnectMax) { if (status) status({ type: 'giveup', n: reconnects, max: cfg.reconnectMax }); return; }
+    reconnecting = true; reconnects++;
+    const g = lastGame;
+    if (status) status({ type: 'reconnect', n: reconnects, max: cfg.reconnectMax });
+    B.killRoblox();
+    await new Promise(r => setTimeout(r, Math.max(2, cfg.reconnectDelay) * 1000));
+    try {
+      if (watcher) watcher.reset();
+      launchedAt = Date.now();
+      await relaunch(g.placeId, cfg.reconnectSameServer && reconnects === 1 ? g.jobId : null);
+      seen = false;
+    } catch { if (status) status({ type: 'fail' }); }
+    reconnecting = false;
+  }
+  const background = !!(watcher || bg || cfg.overlay.enabled || cfg.fx.enabled || cfg.autoReconnect || cfg.priority !== 'normal' || procs.some(x => x.it.autoClose));
   if (!background) return { background: false };
 
   let seen = false, ended = false, lastPrio = 0, lastTick = Date.now();
@@ -70,6 +94,7 @@ function start({ cfg, update, notify, onFinish }) {
     onFinish();
   };
   const mon = setInterval(async () => {
+    if (reconnecting) return;
     if (Date.now() - lastTick > 30000) { lastTick = Date.now(); B.libTick(); }   // сохраняем время каждые 30 с
     const run = await B.robloxRunning();
     if (run) {

@@ -1,6 +1,6 @@
 {
   "name": "lumen-launcher",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "description": "Lumen — альтернативный лаунчер Roblox",
   "main": "main.js",
   "scripts": {
@@ -36,7 +36,11 @@
       "discover.js",
       "overlay.js",
       "overlay-preload.js",
-      "updater.js"
+      "updater.js",
+      "screenfx.js",
+      "screenfx-preload.js",
+      "diag.js",
+      "http.js"
     ],
     "win": {
       "target": "nsis",

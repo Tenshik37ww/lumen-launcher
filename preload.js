@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const inv = (c, ...a) => ipcRenderer.invoke(c, ...a);
 contextBridge.exposeInMainWorld('api', {
   cfg: { get: () => inv('cfg:get'), set: p => inv('cfg:set', p) },
-  latest: () => inv('latest'), launch: u => inv('launch', u),
+  latest: () => inv('latest'), launch: (u, o) => inv('launch', u, o),
   openMods: () => inv('mods:open'), reset: () => inv('reset'),
   pickSlot: id => inv('slot:pick', id), clearSlot: id => inv('slot:clear', id),
   pickIcon: () => inv('icon:pick'), clearIcon: () => inv('icon:clear'), getIcon: () => inv('icon:get'),
@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('api', {
   pickBgVideo: () => inv('bgv:pick'), clearBgVideo: () => inv('bgv:clear'), getBgVideo: () => inv('bgv:get'),
   updateGet: () => inv('update:get'), updateCheck: () => inv('update:check'), updateDownload: () => inv('update:download'), updateInstall: () => inv('update:install'),
   onUpdate: cb => ipcRenderer.on('update:status', (_, s) => cb(s)),
+  accCheck: () => inv('acc:check'), details: id => inv('details:get', id), badges: uid => inv('badges:get', uid), diag: () => inv('diag:run'),
+  fxPreview: () => inv('fx:preview'), fullscreen: on => inv('win:fullscreen', on), sysInfo: () => inv('sys:info'),
+  onReconnect: cb => ipcRenderer.on('reconnect', (_, d) => cb(d)),
   onNews: cb => ipcRenderer.on('news:badge', (_, n) => cb(n)), onItg: cb => ipcRenderer.on('itg', (_, d) => cb(d)),
   links: () => inv('links:get'), setLink: (id, on) => inv('links:set', id, on),
   applyCss: css => inv('css:apply', css),

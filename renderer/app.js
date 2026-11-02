@@ -24,6 +24,7 @@ const PRESETS = [
   { id: 'e.sky', key: 'FFlagDebugSkyGray', val: 'True' },
 ];
 
+let sysInfo = { material: false }, lastPlay = null;
 let cfg, links = {}, running = false, current = 'home', sel = -1, vlist = [], verState = null, cssTimer, lookTimer, pendingServer = null, libQ = '', libSort = 'recent', libFav = false;
 const dark = matchMedia('(prefers-color-scheme: dark)');
 const t = (k, p) => LANG.t(cfg ? cfg.language : 'ru', k, p);
@@ -56,11 +57,12 @@ function applyLook() {
   const b = document.body;
   b.dataset.style = u.launcherStyle; b.dataset.nav = u.navPos; b.dataset.bg = u.bgMode;
   b.classList.toggle('noanim', !u.animations);
-  b.classList.toggle('glass', u.material !== 'none');
+  b.classList.toggle('glass', u.material !== 'none' && sysInfo.material);
+  r.setProperty('--glass', (u.glass || 60) + '%');
   const title = u.title || 'Lumen';
   $('#brand').textContent = title; document.title = title;
   clearTimeout(lookTimer);
-  lookTimer = setTimeout(() => { api.winLook({ opacity: u.opacity, material: u.material, bg: p.bg }); moveIndicator(); }, 120);
+  lookTimer = setTimeout(() => { api.winLook({ opacity: u.opacity, material: u.material, bg: p.bg }); moveIndicator(true); }, 100);
   if (typeof liveBg === 'function') liveBg();
 }
 async function loadBg() {
@@ -75,17 +77,20 @@ function save(patch) {
   if (patch.ui) cfg.ui = deep(prev.ui, patch.ui);
   if (patch.compat) cfg.compat = { ...prev.compat, ...patch.compat };
   if (patch.overlay) cfg.overlay = { ...prev.overlay, ...patch.overlay };
+  if (patch.fx) cfg.fx = { ...prev.fx, ...patch.fx };
   api.cfg.set(patch);
   applyLook(); vis();
 }
 dark.addEventListener('change', () => cfg && applyLook());
 
 /* ---------- навигация ---------- */
-function moveIndicator() {
+function moveIndicator(instant) {
   const tab = $(`.tab[data-view="${current}"]`), ind = $('.indicator');
   if (!tab) return;
+  if (instant) ind.classList.add('noslide');
   ind.style.width = tab.offsetWidth + 'px'; ind.style.height = tab.offsetHeight + 'px';
   ind.style.transform = `translate(${tab.offsetLeft}px,${tab.offsetTop}px)`;
+  if (instant) { void ind.offsetWidth; requestAnimationFrame(() => ind.classList.remove('noslide')); }
 }
 const ICONS = {
   home: '<path d="M8 5.5v13l11-6.5z"/>',
@@ -98,6 +103,7 @@ const ICONS = {
   settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.1"/><circle cx="9" cy="17" r="2.1"/>',
 };
 function show(id) {
+  if (id === 'detail') { $$('.view').forEach(v => v.classList.toggle('on', v.id === 'detail')); return; }
   current = id;
   if ($('#' + id) && (['library', 'news', 'people', 'stats'].includes(id) || (id === 'discover' && pendingServer))) build(id);
   $$('.tab').forEach(x => x.classList.toggle('on', x.dataset.view === id));
@@ -113,32 +119,44 @@ function renderNav() {
     b.append(E('span', 'tl'));
     list.append(b);
   }
-  $$('.tab').forEach(b => { b.querySelector('.tl').textContent = t('nav.' + b.dataset.view) + (b.dataset.view === 'news' && newsBadge ? ` (${newsBadge})` : ''); });
+  $$('.tab').forEach(b => { const label = t('nav.' + b.dataset.view) + (b.dataset.view === 'news' && newsBadge ? ` (${newsBadge})` : ''); b.querySelector('.tl').textContent = label; b.title = label; });
 }
 
 /* ---------- запуск ---------- */
+function buildIndicators() {
+  const fill = (sel, n, cls) => { const box = $(sel); if (!box) return; for (let k = 0; k < n; k++) { const i = E('i'); i.style.setProperty('--k', k); box.append(i); } };
+  fill('.i-orbit', 10); fill('.i-seg', 24); fill('.i-eq', 9);
+}
 function setProgress(pct, text) {
   const arc = $('#arc');
   arc.classList.remove('intro');
   arc.style.strokeDashoffset = CIRC * (1 - pct / 100);
   $('#barfill').style.width = pct + '%';
+  document.documentElement.style.setProperty('--pct', Math.round(pct));
+  $$('.pct').forEach(e => { e.textContent = Math.round(pct) + '%'; });
+  const segs = $$('.i-seg i'), on = Math.round(pct / 100 * segs.length);
+  segs.forEach((s, i) => s.classList.toggle('on', i < on));
+  $('#garc').style.strokeDashoffset = 251.3 * (1 - pct / 100);
   if (text) $('#status').textContent = text;
+  if (typeof bpStatus === 'function') bpStatus(text);
 }
 function idle() { running = false; document.body.classList.remove('busy'); $('#playLabel').textContent = t('play'); }
-async function play(uri) {
+async function play(uri, opts) {
   if (running) return;
-  running = true;
+  running = true; lastPlay = { uri, opts };
+  $('#noacc').hidden = true;
   document.body.classList.remove('fail'); document.body.classList.add('busy');
   $('#playLabel').textContent = t('launching');
   setProgress(0, t('prep'));
-  const r = await api.launch(uri || null);
+  const r = await api.launch(uri || null, opts);
   idle();
-  if (r && r.ok) setTimeout(() => setProgress(0, t('started')), 1200);
+  if (r && r.ok) { setTimeout(() => setProgress(0, t('started')), 1200); if (typeof exitBP === 'function') exitBP(); }
   else if (r && r.cancelled) setProgress(0, t('cancelled'));
   else {
     document.body.classList.add('fail');
     $('#playLabel').textContent = t('retry');
     setProgress(100, (r && r.error) || t('failed'));
+    if (r && r.accError) { $('#noacc').hidden = false; $('#noacc').textContent = t('acc.noacc'); }
   }
 }
 function preview() {
@@ -217,6 +235,19 @@ const PAGES = {
     { h: 'g.maint' }, rng('cleanLogsDays', 'l.logs', 0, 30, 1),
     { t: 'btns', l: 'l.cleanNow', b: [{ l: 'l.cleanNow.b', fn: async e => { const b = e.target, mb = await api.cleanCache(); b.textContent = t('cleaned', { s: mb }); setTimeout(() => { b.textContent = t('l.cleanNow.b'); }, 3000); } }] },
     { t: 'btns', l: 'l.re', b: [{ l: 'l.re.b', cls: 'danger', fn: async () => { await api.reset(); show('home'); play(); } }] },
+    { h: 'g.net' },
+    { t: 'text', k: 'proxy', l: 'l.proxy', ph: 'http://127.0.0.1:7890', set: v => save({ proxy: v.trim() }) },
+    tog('useSystemRoblox', 'l.sys'),
+    tog('fallbackSystem', 'l.fallback'),
+    { h: 'g.reconnect' },
+    tog('autoReconnect', 'l.rc'),
+    sel_('reconnectMode', 'l.rcMode', [['error', 'rc.m.error'], ['any', 'rc.m.any']], { show: () => cfg.autoReconnect }),
+    rng('reconnectMax', 'l.rcMax', 1, 10, 1, { show: () => cfg.autoReconnect }),
+    rng('reconnectDelay', 'l.rcDelay', 3, 30, 1, { u: 's', show: () => cfg.autoReconnect }),
+    tog('reconnectSameServer', 'l.rcSame', { show: () => cfg.autoReconnect }),
+    { h: 'g.input' },
+    tog('gamepad', 'l.pad'),
+    { t: 'btns', l: 'l.bp', b: [{ l: 'l.bp.b', fn: () => enterBP() }] },
   ],
   mods: () => [
     { h: 'g.mods' },
@@ -259,7 +290,7 @@ const PAGES = {
     ...['bg', 'panel', 'line', 'text', 'mute', 'danger'].map(c => col('ui.colors.' + c, 'c.' + c, { show: () => cfg.ui.theme === 'custom' })),
     { t: 'accent', l: 'k.accent' },
     { h: 'k.l' }, { p: 'k.l.hint' },
-    { t: 'btns', l: 'k.style', sel: sel_('ui.launcherStyle', 'k.style', [['ring', 'st.ring'], ['bar', 'st.bar'], ['minimal', 'st.minimal']]), b: [{ l: 'k.preview', fn: preview }] },
+    { t: 'btns', l: 'k.style', sel: sel_('ui.launcherStyle', 'k.style', ['ring', 'bar', 'minimal', 'orbit', 'pulse', 'dots', 'segments', 'gauge', 'equalizer', 'percent'].map(x => [x, 'st.' + x])), b: [{ l: 'k.preview', fn: preview }] },
     sel_('ui.navPos', 'k.nav', [['left', 'nav.left'], ['right', 'nav.right'], ['top', 'nav.top']]),
     rng('ui.radius', 'k.radius', 0, 28, 1, { u: 'px' }), rng('ui.fs', 'k.fs', 12, 17, 1, { u: 'px' }),
     sel_('ui.font', 'k.font', [['system', 'f.system'], ['mono', 'f.mono'], ['serif', 'f.serif'], ['cond', 'f.cond']]),
@@ -283,7 +314,8 @@ const PAGES = {
       clear: async () => { cfg = await api.clearBgVideo(); applyLook(); build('look'); } },
     { h: 'k.win' },
     rng('ui.opacity', 'k.opacity', 60, 100, 5, { u: '%' }),
-    sel_('ui.material', 'k.mat', [['none', 'mat.none'], ['mica', 'mat.mica'], ['acrylic', 'mat.acrylic']]),
+    sel_('ui.material', 'k.mat', [['none', 'mat.none'], ['mica', 'mat.mica'], ['acrylic', 'mat.acrylic']], { show: () => sysInfo.material }),
+    rng('ui.glass', 'k.glass', 20, 100, 5, { u: '%', show: () => sysInfo.material && cfg.ui.material !== 'none' }),
     { t: 'text', k: 'ui.title', l: 'k.title', ph: 'Lumen', live: true, set: v => save({ ui: { title: v || 'Lumen' } }) },
     { t: 'file', l: 'k.icon', get: () => cfg.ui.icon,
       pick: async () => { const r = await api.pickIcon(); cfg = r.cfg; setIcon(r.icon); build('look'); },
@@ -497,16 +529,33 @@ const avatarOf = (name, url) => safeImg(url) || ('data:image/svg+xml;utf8,' + en
 
 /* ---------- аккаунты ---------- */
 function renderAccChip() {
-  const chip = $('#accchip'), s = $('#accSel'), list = cfg.accounts || [];
+  const chip = $('#accchip'), list = cfg.accounts || [], act = list.find(x => x.id === cfg.activeAccount);
   chip.hidden = !list.length;
   if (!list.length) return;
-  s.replaceChildren();
-  const o0 = E('option', null, t('acc.sys')); o0.value = ''; s.append(o0);
-  for (const a of list) { const o = E('option', null, a.display + (a.expired ? ' ⚠' : '')); o.value = a.id; s.append(o); }
-  s.value = cfg.activeAccount || '';
-  const act = list.find(a => a.id === cfg.activeAccount);
-  $('#accImg').hidden = !act; if (act) $('#accImg').src = avatarOf(act.display, act.avatar);
-  s.onchange = () => { save({ activeAccount: s.value || null }); renderAccChip(); };
+  $('#accImg').src = avatarOf(act ? act.display : 'R', act && act.avatar);
+  $('#accName').textContent = act ? act.display + (act.expired ? ' ⚠' : '') : t('acc.sys');
+}
+function toggleAccMenu() {
+  const m = $('#accmenu');
+  if (!m.hidden) { m.hidden = true; return; }
+  m.replaceChildren();
+  const item = (name, subt, url, active, warn, fn) => {
+    const b = E('button', 'accitem' + (active ? ' on' : '')), img = E('img'), L = E('span');
+    img.src = url; L.append(E('b', null, name), E('small', null, subt)); b.append(img, L);
+    if (warn) b.append(E('span', 'tag bad', '⚠'));
+    if (active) b.append(E('span', 'tag ok', '✓'));
+    b.onclick = () => { fn(); m.hidden = true; renderAccChip(); }; return b;
+  };
+  m.append(item(t('acc.sys'), t('acc.sys.d'), avatarOf('R'), !cfg.activeAccount, false, () => save({ activeAccount: null })));
+  for (const a of cfg.accounts) m.append(item(a.display, '@' + a.name, avatarOf(a.display, a.avatar), a.id === cfg.activeAccount, a.expired, () => save({ activeAccount: a.id })));
+  const manage = E('button', 'accitem manage', t('acc.manage'));
+  manage.onclick = () => { m.hidden = true; segState.people = 'accounts'; show('people'); };
+  m.append(E('hr'), manage);
+  m.hidden = false;
+  const r = $('#accBtn').getBoundingClientRect(), top = document.body.dataset.nav === 'top';
+  m.style.minWidth = Math.max(250, r.width) + 'px';
+  m.style.left = Math.max(8, Math.min(innerWidth - m.offsetWidth - 8, r.left)) + 'px';
+  m.style.top = (top ? r.bottom + 6 : Math.max(8, r.top - m.offsetHeight - 6)) + 'px';
 }
 
 function accounts() {
@@ -516,7 +565,9 @@ function accounts() {
     const bar = E('div', 'toolbar'), add = E('button', 'btn primary', t('acc.add'));
     bar.style.justifyContent = 'flex-end';
     add.onclick = async () => { add.disabled = true; cfg = await api.addAccount(); renderAccChip(); draw(); };
-    bar.append(add); W.append(bar);
+    const chk = E('button', 'btn', t('acc.check'));
+    chk.onclick = async () => { chk.disabled = true; const c = await api.accCheck(); cfg = { ...cfg, accounts: c.accounts }; renderAccChip(); draw(); };
+    bar.append(chk, add); W.append(bar);
     const G = grp(t('acc.cur')); W.append(G);
 
     const sys = E('div', 'row'), useSys = E('button', 'btn', t('acc.use'));
@@ -607,15 +658,27 @@ function applyLang() {
 /* ---------- старт ---------- */
 async function init() {
   cfg = await api.cfg.get();
+  try { sysInfo = await api.sysInfo(); } catch {}
   links = await api.links();
   for (const id of NAV.slice(1)) { const s = E('section', 'view'); s.id = id; $('#pages').append(s); }
   $$('[data-win]').forEach(b => b.onclick = () => api.win(b.dataset.win));
   $('#play').onclick = () => play();
   api.onProgress(d => setProgress(d.percent, d.text));
-  api.onBoot(({ uri }) => { show('home'); play(uri); });
+  api.onBoot(d => { if (d.bigpicture) { if (typeof enterBP === 'function') enterBP(); return; } show('home'); play(d.uri); });
+  api.onReconnect(i => {
+    if (!i) return;
+    setProgress(0, i.type === 'reconnect' ? t('rc.try', { n: i.n, m: i.max }) : i.type === 'giveup' ? t('rc.giveup', { n: i.n, m: i.max }) : t('rc.fail'));
+  });
   api.onActivity(showActivity);
 
+  buildIndicators();
+  $('#noacc').onclick = () => play(lastPlay && lastPlay.uri, { noAccount: true });
+  $('#accBtn').onclick = e => { e.stopPropagation(); toggleAccMenu(); };
+  document.addEventListener('click', e => { if (!e.target.closest('#accmenu,#accBtn')) $('#accmenu').hidden = true; });
+  if (typeof ResizeObserver !== 'undefined') { const ro = new ResizeObserver(() => moveIndicator(true)); ro.observe($('#rail')); ro.observe($('#navlist')); }
+  addEventListener('resize', () => moveIndicator(true));
   applyLang(); applyLook();
+  api.accCheck().then(c => { if (c && c.accounts) { cfg = { ...cfg, accounts: c.accounts }; renderAccChip(); } }).catch(() => {});
   setIcon(await api.getIcon()); loadBg();
   show('home');
   verState = await api.latest(); setVer();

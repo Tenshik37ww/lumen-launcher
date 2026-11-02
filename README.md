@@ -25,7 +25,9 @@
 
 ## Прочее
 
-- `Lumen --play` запускает Roblox сразу, `Lumen --studio` запускает Roblox Studio.
+- `Lumen --play` запускает Roblox сразу, `Lumen --studio` запускает Roblox Studio, `Lumen --bigpicture` открывает режим Big Picture.
+- Поиск по лаунчеру: Ctrl+K или `/`. Геймпад: стрелки/стик, A, B, LB/RB, Y (поиск), Start (играть), Select (Big Picture).
+- Если Roblox «не виден»: Инструменты → Диагностика покажет доступность серверов и найденные копии Roblox; прокси задаётся в Настройки → Лаунчер.
 - Данные: `%LOCALAPPDATA%\Lumen`.
 - Для Discord Rich Presence нужен свой Application ID (discord.com/developers).
 - FPS в оверлее требует отдельно скачанного PresentMon.

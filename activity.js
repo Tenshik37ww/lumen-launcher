@@ -1,5 +1,6 @@
 // Отслеживание активности по журналу Roblox (шаблоны строк могут измениться с обновлениями Roblox)
 const fs = require('fs');
+const { xfetch } = require('./http');
 const os = require('os');
 const path = require('path');
 const LOGS = path.join(process.env.LOCALAPPDATA || os.homedir(), 'Roblox', 'logs');
@@ -8,11 +9,13 @@ const RX = {
   udmux: /UDMUX Address = ([\d.]+), Port = \d+ \| RCC Server Address = ([\d.]+), Port = \d+/,
   joined: /\[FLog::Network\] serverId: ([\d.]+)\|\d+/,
 };
+const ERR_RX = /Connection (lost|failed|timed out)|Disconnect(ed)? (reason|code)|Sending disconnect with reason: ?([2-9]\d\d)|Error Code: ?(2[0-9]\d|5\d\d)/i;
 const DISCONNECT = '[FLog::Network] Time to disconnect replication data:';
 const TELEPORT = '[FLog::SingleSurfaceApp] initiateTeleport';
 
 class ActivityWatcher {
-  constructor(since, cb) { this.since = since; this.cb = cb; this.file = null; this.off = 0; this.buf = ''; this.s = null; this.tp = false; }
+  constructor(since, cb) { this.since = since; this.cb = cb; this.file = null; this.off = 0; this.buf = ''; this.s = null; this.tp = false; this.err = null; }
+  reset() { this.file = null; this.off = 0; this.buf = ''; this.s = null; this.tp = false; this.err = null; this.since = Date.now() - 3000; }
   start() { this.timer = setInterval(() => this.poll(), 1000); }
   stop() { clearInterval(this.timer); }
   poll() {
@@ -35,15 +38,16 @@ class ActivityWatcher {
   }
   line(l) {
     let m;
+    if (ERR_RX.test(l)) this.err = l.trim().slice(0, 160);
     if ((m = RX.joining.exec(l))) { this.s = { jobId: m[1], placeId: m[2], ip: m[3], serverIp: null, joined: false }; this.tp = false; }
     else if (this.s && (m = RX.udmux.exec(l))) this.s.serverIp = m[2];
     else if (this.s && RX.joined.test(l)) { if (!this.s.joined) { this.s.joined = true; this.cb('joined', this.s); } }
     else if (l.includes(TELEPORT)) this.tp = true;
-    else if (l.includes(DISCONNECT)) { if (!this.tp && this.s) { const s = this.s; this.s = null; this.cb('leave', s); } }
+    else if (l.includes(DISCONNECT)) { if (!this.tp && this.s) { const s = { ...this.s, error: this.err }; this.s = null; this.err = null; this.cb('leave', s); } }
   }
 }
 
-const j = async u => { const r = await fetch(u, { signal: AbortSignal.timeout(8000) }); if (!r.ok) throw new Error(r.status); return r.json(); };
+const j = async u => { const r = await xfetch(u, { signal: AbortSignal.timeout(8000) }); if (!r.ok) throw new Error(r.status); return r.json(); };
 async function placeInfo(placeId) {
   const { universeId } = await j(`https://apis.roblox.com/universes/v1/places/${placeId}/universe`);
   const [g, i] = await Promise.all([
@@ -66,7 +70,7 @@ async function findServers(q) {
   if (!m) return { error: 'bad' };
   const placeId = m[1];
   let r;
-  try { r = await fetch(`https://games.roblox.com/v1/games/${placeId}/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100`, { signal: AbortSignal.timeout(10000) }); }
+  try { r = await xfetch(`https://games.roblox.com/v1/games/${placeId}/servers/Public?sortOrder=Asc&excludeFullGames=true&limit=100`, { signal: AbortSignal.timeout(10000) }); }
   catch { return { error: 'net' }; }
   if (r.status === 429) return { error: 'rate' };
   if (!r.ok) return { error: 'net' };

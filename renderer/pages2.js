@@ -64,6 +64,8 @@ function card(p, big, refresh) {
   fs_.value = p.folder || '';
   fs_.onchange = async () => { await api.libSet(p.placeId, { folder: fs_.value || null }); refresh(); };
   ov.append(pl, sv, fs_, rm);
+  ov.onclick = e => e.stopPropagation();
+  c.onclick = () => openGame(p.placeId);
   const meta = E('div', 'meta');
   meta.append(E('b', null, p.name || p.placeId), E('small', null, p.totalMs ? fmtTime(p.totalMs) : t('lib.never')),
     E('small', null, p.last ? t('lib.last', { d: new Date(p.last).toLocaleDateString(cfg.language, { day: 'numeric', month: 'short' }) }) : ''));
@@ -149,6 +151,8 @@ function gameCard(g) {
     fv.onclick = async () => { const r = await api.libAdd(String(g.placeId)); if (!r.error) { await api.libSet(String(g.placeId), { fav: true }); fv.textContent = t('d.in'); fv.disabled = true; } };
   }
   ov.append(pl, sv, fv);
+  ov.onclick = e => e.stopPropagation();
+  if (isId(g.placeId)) c.onclick = () => openGame(g.placeId);
   const meta = E('div', 'meta');
   meta.append(E('b', null, g.name),
     E('small', null, [t('d.card.p', { n: (g.playing || 0).toLocaleString(cfg.language) }), g.rating != null ? t('d.card.r', { r: g.rating }) : ''].filter(Boolean).join('  ·  ')),
@@ -230,7 +234,8 @@ function friendsPage() {
   const row = (f, extra) => {
     const r = E('div', 'frow'), img = E('img'), info = E('div', 'grow');
     img.src = avatarOf(f.display, f.avatar);
-    info.append(E('b', null, f.display), E('small', null, '@' + f.name + (extra ? '  ·  ' + extra : '')));
+    const nick = f.deleted ? t('f.deleted') : (f.name && f.name !== f.display ? '@' + f.name : '');
+    info.append(E('b', null, f.display + (f.verified ? ' ✔' : '')), E('small', null, [nick, extra].filter(Boolean).join('  ·  ') || '\u00a0'));
     r.append(img, info); return r;
   };
   const tile = (label, v) => { const x = E('div', 'tile'); x.append(E('b', null, String(v)), E('small', null, label)); return x; };

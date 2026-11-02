@@ -6,6 +6,7 @@ const { spawn, execFile } = require('child_process');
 const AdmZip = require('adm-zip');
 const { t } = require('./lang');
 const { cursorPng } = require('./png');
+const { xfetch } = require('./http');
 
 const ROOT = path.join(process.env.LOCALAPPDATA || os.homedir(), 'Lumen');
 const P = {
@@ -24,6 +25,10 @@ const DEFAULTS = {
   accounts: [], activeAccount: null,
   studioPath: '', newsNotify: true, verifyOnLaunch: false, folders: [],
   autoUpdateCheck: true, updateMode: 'notify', updatePrerelease: false,
+  proxy: '', useSystemRoblox: false, fallbackSystem: true, installedDir: null,
+  autoReconnect: false, reconnectMode: 'error', reconnectMax: 3, reconnectDelay: 8, reconnectSameServer: true,
+  fx: { enabled: false, scan: 40, vignette: 30, grain: 10, warmth: 0, dim: 0, curve: 0 },
+  gamepad: true,
   overlay: {
     enabled: false, corner: 'tr', x: 16, y: 16, scale: 100, opacity: 85, bg: '#0b0e19', text: '#e9edff', accent: '#ffb23e',
     layout: 'column', labels: true, interval: 1000, metrics: ['fps', 'ping', 'cpu', 'ram'], hotkey: 'Control+Shift+O',
@@ -33,7 +38,7 @@ const DEFAULTS = {
     theme: 'system', accent: '', launcherStyle: 'ring', navPos: 'left', radius: 12, fs: 14, font: 'system', glow: 55,
     animations: true, animSpeed: 1, bgMode: 'solid', bgColor2: '#1d2a55', bgAngle: 135, bgBlur: 12, bgDim: 55, bgImage: null,
     opacity: 100, material: 'none', title: 'Lumen', icon: null, customCss: '',
-    bgVideo: null, live: 'stars', liveSpeed: 1, liveDensity: 50,
+    bgVideo: null, live: 'stars', liveSpeed: 1, liveDensity: 50, glass: 60,
     colors: { bg: '#0b0e19', panel: '#121829', line: '#232b45', text: '#e9edff', mute: '#8d97b8', danger: '#ff6b6b' },
   },
 };
@@ -56,13 +61,14 @@ const merge = (a, b) => { const o = { ...a }; for (const k in b) o[k] = isObj(b[
 function loadConfig() {
   let s = {};
   try { s = JSON.parse(fs.readFileSync(P.cfg, 'utf8')); } catch {}
-  return { ...DEFAULTS, ...s, ui: merge(DEFAULTS.ui, s.ui || {}), compat: { ...DEFAULTS.compat, ...(s.compat || {}) }, overlay: { ...DEFAULTS.overlay, ...(s.overlay || {}) } };
+  return { ...DEFAULTS, ...s, ui: merge(DEFAULTS.ui, s.ui || {}), compat: { ...DEFAULTS.compat, ...(s.compat || {}) }, overlay: { ...DEFAULTS.overlay, ...(s.overlay || {}) }, fx: { ...DEFAULTS.fx, ...(s.fx || {}) } };
 }
 function saveConfig(patch) {
   const c = loadConfig(), n = { ...c, ...patch };
   if (patch.ui) n.ui = merge(c.ui, patch.ui);
   if (patch.compat) n.compat = { ...c.compat, ...patch.compat };
   if (patch.overlay) n.overlay = { ...c.overlay, ...patch.overlay };
+  if (patch.fx) n.fx = { ...c.fx, ...patch.fx };
   fs.mkdirSync(P.root, { recursive: true });
   fs.writeFileSync(P.cfg, JSON.stringify(n, null, 2));
   return n;
@@ -74,7 +80,7 @@ const cdn = ch => isLive(ch) ? 'https://setup.rbxcdn.com' : `https://setup.rbxcd
 
 async function getLatest(channel) {
   const suffix = isLive(channel) ? '' : `/channel/${channel.toLowerCase()}`;
-  const r = await fetch(`https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer${suffix}`);
+  const r = await xfetch(`https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer${suffix}`);
   if (!r.ok) throw new Error(T('err.ver', { s: r.status }));
   const j = await r.json();
   return { guid: j.clientVersionUpload, version: j.version };
@@ -89,7 +95,7 @@ function parseManifest(text) {
 }
 
 async function download(url, dest, md5, onBytes) {
-  const r = await fetch(url);
+  const r = await xfetch(url);
   if (!r.ok) throw new Error(T('err.dl', { s: r.status, f: path.basename(dest) }));
   const hash = crypto.createHash('md5'), out = fs.createWriteStream(dest);
   for await (const chunk of r.body) {
@@ -117,7 +123,7 @@ function extract(zipPath, target, only) {
 }
 
 async function downloadSeg(url, dest, md5, size, seg, inc) {
-  const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+  const probe = await xfetch(url, { headers: { Range: 'bytes=0-0' } });
   await probe.arrayBuffer();
   if (probe.status !== 206) return download(url, dest, md5, inc);   // сервер не поддерживает Range
   const fd = fs.openSync(dest, 'w'), part = Math.ceil(size / seg);
@@ -125,7 +131,7 @@ async function downloadSeg(url, dest, md5, size, seg, inc) {
     await Promise.all(Array.from({ length: seg }, async (_, i) => {
       const a = i * part, b = Math.min(size - 1, a + part - 1);
       if (a > b) return;
-      const r = await fetch(url, { headers: { Range: `bytes=${a}-${b}` } });
+      const r = await xfetch(url, { headers: { Range: `bytes=${a}-${b}` } });
       if (r.status !== 206) throw new Error(T('err.dl', { s: r.status, f: path.basename(dest) }));
       let pos = a;
       for await (const ch of r.body) { fs.writeSync(fd, ch, 0, ch.length, pos); pos += ch.length; inc(ch.length); }
@@ -138,7 +144,7 @@ async function downloadSeg(url, dest, md5, size, seg, inc) {
 
 async function install(guid, channel, dir, send) {
   const base = `${cdn(channel)}/${guid}-`, cfg = loadConfig();
-  const mr = await fetch(base + 'rbxPkgManifest.txt');
+  const mr = await xfetch(base + 'rbxPkgManifest.txt');
   if (!mr.ok) throw new Error(T('err.man', { s: mr.status }));
   const pkgs = parseManifest(await mr.text()).filter(p => p.name in PKG_DIRS);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -289,26 +295,53 @@ function cleanup(keep) {
   for (const d of fs.readdirSync(P.versions)) if (!keep.has(d)) { try { fs.rmSync(path.join(P.versions, d), { recursive: true, force: true }); } catch {} }
 }
 
+// установленный официальный Roblox (или Bloxstrap и его форки): запасной вариант, если свою копию скачать не удалось
+function findSystemRoblox() {
+  const la = process.env.LOCALAPPDATA || os.homedir();
+  let best = null, mt = 0;
+  for (const r of ['Roblox', 'Bloxstrap', 'Fishstrap', 'Voidstrap'].map(n => path.join(la, n, 'Versions'))) {
+    let ds = []; try { ds = fs.readdirSync(r); } catch {}
+    for (const d of ds) {
+      const dir = path.join(r, d);
+      try { const m = fs.statSync(path.join(dir, 'RobloxPlayerBeta.exe')).mtimeMs; if (m > mt) { mt = m; best = dir; } } catch {}
+    }
+  }
+  return best;
+}
+const installDir = (c = loadConfig()) =>
+  c.installedDir && fs.existsSync(path.join(c.installedDir, 'RobloxPlayerBeta.exe')) ? c.installedDir
+    : c.installed && fs.existsSync(path.join(P.versions, c.installed, 'RobloxPlayerBeta.exe')) ? path.join(P.versions, c.installed) : null;
+
 async function ensure(send) {
   fs.mkdirSync(P.root, { recursive: true });
   const cfg = loadConfig(), ok = g => g && fs.existsSync(path.join(P.versions, g, '.complete'));
-  send({ percent: 0, text: T('checking') });
-  let latest = null;
-  try { latest = await getLatest(cfg.channel); } catch (e) { if (!ok(cfg.installed)) throw e; }
-  const have = ok(cfg.installed) ? cfg.installed : null, keep = new Set();
-  let guid, update = null;
-  if (!latest || latest.guid === have) guid = have;
-  else if (have && cfg.backgroundUpdates && freeGB() >= 5) {
-    guid = have; keep.add(latest.guid);
-    update = async () => {
-      await install(latest.guid, cfg.channel, path.join(P.versions, latest.guid), () => {});
-      saveConfig({ installed: latest.guid });
-    };
-  } else { guid = latest.guid; await install(guid, cfg.channel, path.join(P.versions, guid), send); }
-  if (!guid) throw new Error(T('err.ver', { s: 'offline' }));
+  const keep = new Set();
+  let dir, guid, update = null, notice = null;
+  const useSystem = () => { const d = findSystemRoblox(); if (!d) throw new Error(T('err.nosys')); dir = d; guid = path.basename(d); };
+  if (cfg.useSystemRoblox) useSystem();
+  else {
+    try {
+      send({ percent: 0, text: T('checking') });
+      let latest = null;
+      try { latest = await getLatest(cfg.channel); } catch (e) { if (!ok(cfg.installed)) throw e; }
+      const have = ok(cfg.installed) ? cfg.installed : null;
+      if (!latest || latest.guid === have) guid = have;
+      else if (have && cfg.backgroundUpdates && freeGB() >= 5) {
+        guid = have; keep.add(latest.guid);
+        update = async () => {
+          await install(latest.guid, cfg.channel, path.join(P.versions, latest.guid), () => {});
+          saveConfig({ installed: latest.guid, installedDir: path.join(P.versions, latest.guid) });
+        };
+      } else { guid = latest.guid; await install(guid, cfg.channel, path.join(P.versions, guid), send); }
+      if (!guid) throw new Error(T('err.ver', { s: 'offline' }));
+      dir = path.join(P.versions, guid);
+    } catch (e) {
+      if (cfg.fallbackSystem && findSystemRoblox()) { useSystem(); notice = T('notice.system'); }
+      else throw e;
+    }
+  }
 
-  send({ percent: 98, text: T('applying') });
-  const dir = path.join(P.versions, guid);
+  send({ percent: 98, text: notice || T('applying') });
   if (cfg.verifyOnLaunch) {
     const r = await verifyIntegrity(dir, false, () => {});
     if (r.bad && r.bad.length) await repairIntegrity(dir, r.bad, send);
@@ -319,21 +352,24 @@ async function ensure(send) {
   writeFlags(dir, cfg);            // FastFlags применяются последними
   await applyCompat(dir, cfg);
   cleanLogs(cfg.cleanLogsDays);
-  saveConfig({ installed: guid });
+  saveConfig({ installed: guid, installedDir: dir });
   keep.add(guid);
-  if (!(await robloxRunning())) cleanup(keep);
-  return { guid, update };
+  const own = dir.startsWith(P.versions);
+  if (own && !(await robloxRunning())) cleanup(keep);
+  return { guid, update, dir, system: !own };
 }
 
 function launch(uri) {
-  const { installed } = loadConfig(), exe = path.join(P.versions, installed, 'RobloxPlayerBeta.exe');
-  const u = safeUri(uri), args = u ? [u] : ['--app'];
-  spawn(exe, args, { detached: true, stdio: 'ignore', cwd: path.dirname(exe) }).unref();
+  const d = installDir();
+  if (!d) throw new Error(T('err.nosys'));
+  const exe = path.join(d, 'RobloxPlayerBeta.exe'), u = safeUri(uri), args = u ? [u] : ['--app'];
+  const p = spawn(exe, args, { detached: true, stdio: 'ignore', cwd: d });
+  p.on('error', () => {}); p.unref();
 }
 function reset() {
   fs.rmSync(P.versions, { recursive: true, force: true });
   fs.rmSync(P.tmp, { recursive: true, force: true });
-  saveConfig({ installed: null });
+  saveConfig({ installed: null, installedDir: null });
 }
 
 /* ---------- безопасные ссылки, совместимость, приоритет, мультиокно, очистка, история ---------- */
@@ -463,7 +499,7 @@ async function verifyIntegrity(dir, full, send) {
 }
 async function repairIntegrity(dir, bad, send) {
   const guid = path.basename(dir), cfg = loadConfig(), base = `${cdn(cfg.channel)}/${guid}-`;
-  const mr = await fetch(base + 'rbxPkgManifest.txt');
+  const mr = await xfetch(base + 'rbxPkgManifest.txt');
   if (!mr.ok) throw new Error(T('err.man', { s: mr.status }));
   const man = new Map(parseManifest(await mr.text()).map(p => [p.name, p]));
   const by = {};
@@ -527,7 +563,7 @@ function addFriendSample(friends) {
 }
 
 module.exports = {
-  verifyIntegrity, repairIntegrity, findStudio, launchStudio, loadStats, addStat, addFriendSample,
+  findSystemRoblox, installDir, verifyIntegrity, repairIntegrity, findStudio, launchStudio, loadStats, addStat, addFriendSample,
   P, loadConfig, saveConfig, getLatest, ensure, launch, reset, robloxRunning, killRoblox,
   safeUri, buildTicketUri, setPriority, holdMutex, releaseMutex, cleanCache, loadHistory, saveHistory, addHistory, endHistory,
   loadLibrary, libUpsert, libStart, libTick, libStop, libSet,
